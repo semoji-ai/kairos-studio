@@ -157,3 +157,27 @@ def test_on_spawn_receives_child_pid(monkeypatch):
     events = list(claude.chat("hi", cfg={"on_spawn": got.append}))
     assert events[-1]["type"] == "done"
     assert len(got) == 1 and isinstance(got[0], int) and got[0] > 0
+
+
+FAKE_LOGGED_OUT = Path(__file__).parent / "fakes" / "fake_logged_out_claude.py"
+
+
+def test_logged_out_yields_auth_required_error(monkeypatch):
+    # 로그인 만료 문구를 답변(done)으로 내보내지 않고 auth_required 오류로 알린다
+    monkeypatch.setenv("KAIROS_CLAUDE_CMD", f"{sys.executable} {FAKE_LOGGED_OUT}")
+    from core.providers import claude
+    ev = list(claude.chat("hi"))
+    assert not any(e["type"] == "done" for e in ev)
+    err = ev[-1]
+    assert err["type"] == "error" and err["code"] == "auth_required"
+    assert "로그인" in err["error"]
+
+
+def test_open_login_command_runs_auth_login(monkeypatch):
+    from core import setup
+    monkeypatch.delenv("KAIROS_LOGIN_CMD", raising=False)
+    monkeypatch.setattr(setup.sys, "platform", "win32")
+    cmd = setup.open_login_command()
+    assert "claude auth login || pause" in cmd
+    monkeypatch.setattr(setup.sys, "platform", "darwin")
+    assert any("claude auth login" in part for part in setup.open_login_command())

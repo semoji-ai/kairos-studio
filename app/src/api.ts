@@ -24,7 +24,7 @@ export type ChatEvent =
   | { type: "progress"; text: string }
   | { type: "status"; code: string; label: string; detail?: string }
   | { type: "done"; message_id: number; session_id: number; provider: string; recalled?: number; sermon_rag?: number; artifacts?: number }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string; code?: string };
 
 export async function health(): Promise<boolean> {
   try { return (await (await fetch("/health")).json()).ok === true; }

@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from email import policy
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -192,7 +193,12 @@ def _last_session_ref(store: Store, session_id: int, provider: str) -> str | Non
     return None
 
 
-_CLI_LOGIN_HINT = {"claude": "claude /login", "codex": "codex login"}
+_CLI_LOGIN_HINT = {"claude": "claude auth login", "codex": "codex login"}
+
+# 로그인 창 중복 방지: 이 시간 안에 다시 요청하면 새로 열지 않는다
+LOGIN_REOPEN_SECONDS = 60
+_login_lock = threading.Lock()
+_login_state = {"opened_at": float("-inf")}
 
 
 def _resolve_cmd(name: str) -> list[str] | None:
@@ -720,11 +726,18 @@ def make_server(host: str, port: int, token: str, store: Store) -> ThreadingHTTP
             return self._send(200, {"ok": rc == 0, "tail": out[-500:]})
 
         def _setup_open_login(self):
-            cmd = setup.open_login_command()
-            try:
-                subprocess.Popen(cmd)
-            except Exception as exc:
-                return self._send(200, {"ok": False, "error": str(exc)})
+            # 앱 시작·채팅 오류에서 자동으로 부르기도 하므로, 방금 연 로그인 창이
+            # 있으면 또 열지 않는다 (브라우저 탭이 여러 개 뜨는 것 방지).
+            with _login_lock:
+                now = time.monotonic()
+                if now - _login_state["opened_at"] < LOGIN_REOPEN_SECONDS:
+                    return self._send(200, {"ok": True, "already_open": True})
+                cmd = setup.open_login_command()
+                try:
+                    subprocess.Popen(cmd)
+                except Exception as exc:
+                    return self._send(200, {"ok": False, "error": str(exc)})
+                _login_state["opened_at"] = now
             return self._send(200, {"ok": True})
 
         def _setup_install_workspace(self):

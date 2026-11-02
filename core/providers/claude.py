@@ -24,6 +24,12 @@ _INTERPRETERS = ["py -3", "py", "python", "python3"]
 _ENV_PREFIXED = ["PYTHONIOENCODING=utf-8 py -3"]
 
 MODEL = "claude-opus-5-5"
+
+# 로그인이 풀렸을 때 CLI는 결과를 is_error로 내고 "Not logged in · Please run /login"
+# 같은 문구를 돌려준다 (assistant 메시지의 error는 "authentication_failed").
+AUTH_ERROR_TEXT = re.compile(r"/login|not logged in|oauth token|invalid api key", re.I)
+AUTH_REQUIRED_MESSAGE = ("Claude 로그인이 만료되었습니다. 로그인 창을 열었으니 "
+                         "브라우저에서 로그인하신 뒤 다시 보내 주세요.")
 # Opus 5.5의 기본 effort는 medium(4.8보다 한 단계 낮음) — 원고 품질 유지를 위해 명시한다.
 EFFORT = "high"
 
@@ -124,6 +130,7 @@ def chat(prompt: str, session_ref: str | None = None,
         on_spawn(proc.pid)
 
     final_text, session_id, model, got_result = "", None, None, False
+    auth_failed, result_is_error = False, False
     assert proc.stdout is not None
     for line in proc.stdout:
         line = line.strip()
@@ -137,6 +144,9 @@ def chat(prompt: str, session_ref: str | None = None,
         if t == "system":
             session_id = msg.get("session_id", session_id)
             model = msg.get("model", model)
+        elif t == "assistant":
+            if msg.get("error") == "authentication_failed":
+                auth_failed = True
         elif t == "stream_event":
             delta = (msg.get("event") or {}).get("delta") or {}
             if delta.get("type") == "text_delta" and delta.get("text"):
@@ -144,6 +154,7 @@ def chat(prompt: str, session_ref: str | None = None,
         elif t == "result":
             final_text = msg.get("result") or final_text
             session_id = msg.get("session_id", session_id)
+            result_is_error = bool(msg.get("is_error"))
             got_result = True
             # result가 최종 이벤트다. Windows 실측: CLI가 result 후에도
             # 종료하지 않고 머무는 경우가 있어 EOF를 기다리면 영구 행 —
@@ -160,5 +171,10 @@ def chat(prompt: str, session_ref: str | None = None,
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+    # 로그인 만료를 답변으로 저장하지 않고, 앱이 로그인 창을 열 수 있게 알린다
+    if auth_failed or (result_is_error and AUTH_ERROR_TEXT.search(final_text or "")):
+        yield {"type": "error", "code": "auth_required", "error": AUTH_REQUIRED_MESSAGE,
+               "detail": final_text}
+        return
     yield {"type": "done", "text": final_text,
            "session_ref": session_id, "model": model}
