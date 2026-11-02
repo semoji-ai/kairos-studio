@@ -957,3 +957,27 @@ def test_learning_rejects_second_job_while_running_and_survives_bad_upload(srv, 
             {"name": "설교.md", "title": "설교", "type": "primary", "include": True}]})
     assert e.value.code == 409
     assert not list((ws / "raw" / "entries").glob("*.md"))
+
+
+def test_chat_logged_out_streams_auth_required_and_saves_no_answer(srv, monkeypatch):
+    url, store = srv
+    monkeypatch.setenv("KAIROS_CLAUDE_CMD",
+                       f"{sys.executable} {FAKES/'fake_logged_out_claude.py'}")
+    events = _sse_events(_req(url, "/chat", {"text": "@claude 안녕하세요"}))
+    err = events[-1]
+    assert err["type"] == "error" and err["code"] == "auth_required"
+    sessions = json.load(_req(url, "/sessions"))["sessions"]
+    msgs = json.load(_req(url, f"/messages?session_id={sessions[0]['id']}"))["messages"]
+    assert [m["role"] for m in msgs] == ["user"]  # 로그인 만료 문구가 답변으로 남지 않음
+
+
+def test_open_login_does_not_reopen_within_a_minute(srv, monkeypatch):
+    # 앱 시작·채팅 오류에서 자동으로 불려도 로그인 창은 한 번만 연다
+    from core import server
+    url, _ = srv
+    monkeypatch.setenv("KAIROS_LOGIN_CMD", f"{sys.executable} -c pass")
+    monkeypatch.setitem(server._login_state, "opened_at", float("-inf"))
+    first = json.load(_req(url, "/setup/open-login", {}))
+    second = json.load(_req(url, "/setup/open-login", {}))
+    assert first == {"ok": True}
+    assert second == {"ok": True, "already_open": True}

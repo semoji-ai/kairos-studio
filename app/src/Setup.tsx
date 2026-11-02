@@ -1,7 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { installCli, installWorkspace, openLogin, putSettings, setupStatus } from "./api";
 import type { SetupStatus } from "./api";
 import { Emoji } from "./emoji";
+
+// 앱을 켤 때 로그인이 풀려 있으면 로그인 페이지를 한 번만 자동으로 연다
+// (화면이 다시 그려져도 앱 실행당 한 번).
+let autoLoginOpened = false;
+const LOGIN_POLL_MS = 3000;
+const LOGIN_POLL_LIMIT_MS = 10 * 60 * 1000;
 
 export default function Setup({ onDone }: { onDone: () => void }) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
@@ -12,6 +18,9 @@ export default function Setup({ onDone }: { onDone: () => void }) {
   const [wsResult, setWsResult] = useState<{ workspace_dir: string; skills: number } | null>(null);
   const [wsError, setWsError] = useState<string | null>(null);
   const [permBumped, setPermBumped] = useState(false);
+  const [loginOpened, setLoginOpened] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const loginStartedAt = useRef<number | null>(null);
 
   function refresh() {
     return setupStatus().then(setStatus);
@@ -31,7 +40,14 @@ export default function Setup({ onDone }: { onDone: () => void }) {
   }
 
   async function doOpenLogin() {
-    await openLogin();
+    setLoginError(null);
+    const res = await openLogin().catch(e => ({ ok: false, error: String(e) }));
+    if (!res.ok) {
+      setLoginError(res.error || "로그인 창을 열지 못했습니다.");
+      return;
+    }
+    loginStartedAt.current = Date.now();
+    setLoginOpened(true);
   }
 
   async function doCheck() {
@@ -60,6 +76,33 @@ export default function Setup({ onDone }: { onDone: () => void }) {
   const claude = status?.cli?.claude;
   const installed = !!claude?.installed;
   const authed = !!claude?.authed;
+
+  // 로그인이 풀려 있으면 로그인 페이지를 자동으로 연다
+  useEffect(() => {
+    if (status && installed && !authed && !autoLoginOpened) {
+      autoLoginOpened = true;
+      doOpenLogin();
+    }
+  }, [status, installed, authed]);
+
+  // 로그인 창을 연 뒤에는 몇 초마다 확인해 끝나면 저절로 '완료'로 바뀐다
+  useEffect(() => {
+    if (!loginOpened || authed) return;
+    const timer = window.setInterval(() => {
+      const started = loginStartedAt.current ?? Date.now();
+      if (Date.now() - started > LOGIN_POLL_LIMIT_MS) {
+        window.clearInterval(timer);
+        return;
+      }
+      refresh().catch(() => {});
+    }, LOGIN_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [loginOpened, authed]);
+
+  // 로그인 때문에 이 화면이 떴던 거라면, 로그인이 끝나고 모두 준비되면 바로 시작한다
+  useEffect(() => {
+    if (loginOpened && authed && status?.all_ready) onDone();
+  }, [loginOpened, authed, status?.all_ready]);
 
   return (
     <main className="page">
@@ -99,11 +142,21 @@ export default function Setup({ onDone }: { onDone: () => void }) {
         {authed ? (
           <p className="hint">로그인되어 있습니다.</p>
         ) : (
-          <div className="field-row">
-            <button className="btn-primary" onClick={doOpenLogin} disabled={!installed}>로그인 터미널 열기</button>
-            <button disabled={checking} onClick={doCheck}>
-              {checking ? "확인 중..." : "다시 확인"}
-            </button>
+          <div className="stack">
+            {loginOpened && (
+              <p className="hint">
+                브라우저에 Claude 로그인 페이지를 열었습니다. 로그인하시면 자동으로 넘어갑니다.
+              </p>
+            )}
+            {loginError && <div className="notice error">{loginError}</div>}
+            <div className="field-row">
+              <button className="btn-primary" onClick={doOpenLogin} disabled={!installed}>
+                {loginOpened ? "로그인 페이지 다시 열기" : "로그인 페이지 열기"}
+              </button>
+              <button disabled={checking} onClick={doCheck}>
+                {checking ? "확인 중..." : "다시 확인"}
+              </button>
+            </div>
           </div>
         )}
       </section>

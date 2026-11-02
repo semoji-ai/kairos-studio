@@ -21,17 +21,22 @@ def cli_install_command() -> list[str]:
 
 
 def open_login_command() -> list[str]:
-    """로그인 세션을 위한 터미널을 여는 명령. env `KAIROS_LOGIN_CMD` 우선."""
+    """로그인 터미널을 여는 명령. env `KAIROS_LOGIN_CMD` 우선.
+
+    `claude auth login`은 브라우저 로그인 페이지를 바로 열고, 로그인이 끝나면
+    스스로 끝난다 — 터미널에서 /login을 따로 입력할 필요가 없다. 실패하면 창을
+    닫지 않고 멈춰 오류를 읽을 수 있게 한다.
+    """
     override = os.environ.get("KAIROS_LOGIN_CMD")
     if override:
         return override.split()
     if sys.platform == "win32":
-        return ["cmd", "/c", "start", "cmd", "/k", "claude"]
+        return ["cmd", "/c", "start", "Claude Login", "cmd", "/c", "claude auth login || pause"]
     # `open -a Terminal claude`는 claude를 '파일 경로'로 해석해 no-op이 된다.
-    # osascript로 Terminal에서 claude를 실제 실행 + 전면으로.
+    # osascript로 Terminal에서 실제 실행 + 전면으로.
     return [
         "osascript",
-        "-e", 'tell application "Terminal" to do script "claude"',
+        "-e", 'tell application "Terminal" to do script "claude auth login && exit"',
         "-e", 'tell application "Terminal" to activate',
     ]
 

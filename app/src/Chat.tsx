@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  chat, deleteSession, health, listMessages, listReviews, listSessions, sendFeedback,
+  chat, deleteSession, health, listMessages, listReviews, listSessions, openLogin, sendFeedback,
   workspaceFileUrl,
 } from "./api";
 import type { ChatEvent, Msg, Session } from "./api";
@@ -255,6 +255,8 @@ export default function Chat() {
         } else {
           setPending(null); setPendingLog(""); setPendingStatus(null);
           setPendingStartedAt(null); setBusy(false);
+          // 로그인 만료: 로그인 페이지를 바로 띄운다 (서버가 1분 안 중복 실행은 막음)
+          if (ev.code === "auth_required") openLogin().catch(() => {});
           setMsgs(m => [...m, { id: -2, session_id: sessionId ?? -1, role: "assistant",
                                 content: [{ type: "text", text: `⚠️ ${ev.error}` }] }]);
         }
