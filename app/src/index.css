@@ -94,7 +94,8 @@
 /* ── 기본 요소 ───────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; }
-#root { min-height: 100vh; display: flex; flex-direction: column; }
+/* 화면 배율(zoom)을 키우면 vh·vw도 같이 커져 창 밖으로 넘친다 — 배율로 나눠 창 크기에 맞춘다 */
+#root { min-height: calc(100vh / var(--ui-zoom, 1)); display: flex; flex-direction: column; }
 
 h1, h2, h3, h4 { color: var(--ink); line-height: 1.3; }
 h1, h2 { font-family: var(--serif); font-weight: 600; letter-spacing: -0.01em; }
@@ -155,7 +156,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 .emoji { display: inline-block; flex: none; vertical-align: -0.22em; user-select: none; }
 
 /* ── 앱 골격 ─────────────────────────────────────────────── */
-.app-shell { display: flex; flex-direction: column; height: 100vh; }
+.app-shell { display: flex; flex-direction: column; height: calc(100vh / var(--ui-zoom, 1)); }
 .app-body { display: flex; flex: 1; min-height: 0; }
 .offline-banner {
   padding: 7px 16px;
@@ -238,7 +239,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
   align-items: center;
   gap: 4px;
   margin: 0 -4px;
-  padding: 10px 4px 2px;
+  padding: 10px 4px 8px;
   border-top: 1px solid var(--line);
 }
 .scale-label { flex: 1; color: var(--muted); font-size: 12px; }
@@ -365,7 +366,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 /* 진행 표시 */
 .chat-progress {
   display: flex;
-  min-width: min(430px, 68vw);
+  min-width: min(430px, calc(68vw / var(--ui-zoom, 1)));
   align-items: center;
   gap: 10px;
   margin: 0 0 10px;
@@ -675,7 +676,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 
 @media (max-width: 800px) {
   .artifact-resizer { display: none; }
-  .artifact-preview { position: absolute; z-index: 20; inset: 0 0 0 auto; width: min(92vw, 680px); flex-basis: auto; }
+  .artifact-preview { position: absolute; z-index: 20; inset: 0 0 0 auto; width: min(calc(92vw / var(--ui-zoom, 1)), 680px); flex-basis: auto; }
   .chat-with-preview { position: relative; }
   .theology-review { padding: 16px 14px 48px; }
   .theology-review-options { grid-template-columns: repeat(2, 1fr); }
@@ -794,7 +795,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 }
 .ppt-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; max-width: 1180px; margin: 0 auto 28px; }
 .ppt-eyebrow { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .16em; }
-.ppt-header h1 { margin: 8px 0 8px; font-size: clamp(28px, 3.4vw, 40px); line-height: 1.15; }
+.ppt-header h1 { margin: 8px 0 8px; font-size: clamp(28px, calc(3.4vw / var(--ui-zoom, 1)), 40px); line-height: 1.15; }
 .ppt-header p { margin: 0; color: var(--muted); }
 .engine-status { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 8px; }
 .engine-status span {

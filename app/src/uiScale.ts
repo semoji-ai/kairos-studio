@@ -10,7 +10,10 @@ export function normalizeScale(value: unknown): number {
 
 export function applyScale(value: unknown): number {
   const scale = normalizeScale(value);
-  document.documentElement.style.setProperty("zoom", String(scale / 100));
+  const root = document.documentElement.style;
+  root.setProperty("zoom", String(scale / 100));
+  // vh·vw로 잡은 크기는 배율만큼 커지므로 CSS에서 이 값으로 나눠 창 크기에 맞춘다 (index.css)
+  root.setProperty("--ui-zoom", String(scale / 100));
   return scale;
 }
 
