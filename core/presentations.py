@@ -219,7 +219,8 @@ class PresentationManager:
         if workspace.is_dir():
             shutil.rmtree(workspace)
         self._write_status(job_id, status="queued", stage="재시도 대기 중", progress=5,
-                           error=None, log=list(current.get("log") or []) + ["작업 재시도\n"])
+                           error=None, recover_attempts=0,
+                           log=list(current.get("log") or []) + ["작업 재시도\n"])
         self._dispatch(job_id, source, dict(current.get("options") or {}))
         return self.get(job_id) or current
 

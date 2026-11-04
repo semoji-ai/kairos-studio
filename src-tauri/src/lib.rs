@@ -128,7 +128,10 @@ pub fn spawn_sidecar(paths: &ResolvedPaths, token: &str, data_dir: &Path) -> std
 ///
 /// The child is deliberately excluded from `SidecarState`: closing or
 /// restarting the Tauri shell reaps only the HTTP sidecar, while this worker
-/// continues processing the durable queue.
+/// continues processing the durable queue. It is not immortal: once the queue
+/// is empty and the sidecar's app heartbeat has stopped, it exits by itself,
+/// and a newer worker takes over from an older one via `worker.stop`
+/// (see core/presentation_worker.py).
 pub fn spawn_presentation_worker(paths: &ResolvedPaths, data_dir: &Path) -> std::io::Result<u32> {
     let cwd = paths.core_dir.parent().unwrap_or(&paths.core_dir);
     let log_dir = data_dir.join("presentations");
