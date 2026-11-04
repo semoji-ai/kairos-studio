@@ -10,6 +10,7 @@ import BibleCoverage from "./BibleCoverage";
 import PresentationStudio from "./PresentationStudio";
 import Learning from "./Learning";
 import ArtifactPreview from "./ArtifactPreview";
+import ScaleControl from "./ScaleControl";
 import type { ArtifactPreviewItem } from "./ArtifactPreview";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -383,6 +384,7 @@ export default function Chat() {
           </div>
         ))}
         </div>
+        <ScaleControl />
       </aside>
       {view === "settings" ? (
         <Settings onClose={() => setView("chat")} />

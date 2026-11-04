@@ -83,6 +83,7 @@ export type Settings = {
   output_dir: string | null;
   font_body: string;
   font_heading: string;
+  ui_scale: number;
 };
 export type WorkspaceInfo = {
   workspace_dir: string | null; exists: boolean | null;

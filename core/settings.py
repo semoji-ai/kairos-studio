@@ -17,6 +17,7 @@ DEFAULTS = {
     "learning_recall_enabled": True,
     "font_body": "system",
     "font_heading": "system",
+    "ui_scale": 100,
 }
 
 _ALLOWED = {
@@ -27,6 +28,8 @@ _ALLOWED = {
     "font_body": {"system", "pretendard", "suit", "ibm-plex-sans-kr", "nanum-gothic"},
     "font_heading": {"system", "maruburi", "gowun-batang",
                      "noto-serif-kr", "nanum-myeongjo", "hahmlet"},
+    # 화면 배율(%) — app/src/uiScale.ts 의 SCALES 와 같아야 한다
+    "ui_scale": {85, 90, 100, 110, 120, 135, 150},
 }
 
 
@@ -127,7 +130,7 @@ def load() -> dict:
     merged.update(_folder_defaults(raw))
     merged.update(raw)
     # 글꼴은 목록에서 빠질 수 있으니(버전 변경·수동 편집) 모르는 값은 기본값으로
-    for key in ("font_body", "font_heading"):
+    for key in ("font_body", "font_heading", "ui_scale"):
         if merged[key] not in _ALLOWED[key]:
             merged[key] = DEFAULTS[key]
     return merged

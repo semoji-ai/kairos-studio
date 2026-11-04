@@ -232,6 +232,31 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
   letter-spacing: .08em;
 }
 .session-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px 16px; }
+/* 글씨 크기 조절 — 사이드바 맨 아래 */
+.scale-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 -4px;
+  padding: 10px 4px 2px;
+  border-top: 1px solid var(--line);
+}
+.scale-label { flex: 1; color: var(--muted); font-size: 12px; }
+.scale-control button {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.scale-control button:hover:not(:disabled) { background: var(--accent-soft); }
+.scale-control button:disabled { opacity: .4; cursor: default; }
+.scale-btn.small { font-size: 12px; }
+.scale-btn.large { font-size: 15px; font-weight: 650; }
+.scale-value { min-width: 52px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .session-rename { flex: 1; min-width: 0; padding: 3px 6px; font-size: 14px; }
 .session-item {
   display: flex;
