@@ -147,3 +147,18 @@ def test_documents_dir_env_override(tmp_path, monkeypatch):
     target.mkdir()
     monkeypatch.setenv("KAIROS_DOCUMENTS_DIR", str(target))
     assert settings.load()["output_dir"] == str(target / "KS_output")
+
+
+def test_ui_scale_default_validation_and_unknown_fallback(tmp_path, monkeypatch):
+    import json as _json
+    import pytest as _pytest
+    from core import settings
+    monkeypatch.setenv("KAIROS_CONFIG_DIR", str(tmp_path))
+    assert settings.load()["ui_scale"] == 100
+    settings.save({"ui_scale": 120})
+    assert settings.load()["ui_scale"] == 120
+    with _pytest.raises(ValueError):
+        settings.save({"ui_scale": 300})
+    # 손으로 고쳐 넣은 모르는 값은 기본값으로
+    (tmp_path / "settings.json").write_text(_json.dumps({"ui_scale": 77}), encoding="utf-8")
+    assert settings.load()["ui_scale"] == 100
