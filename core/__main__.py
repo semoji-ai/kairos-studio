@@ -6,6 +6,7 @@ import secrets
 import sqlite3
 import sys
 import threading
+import time
 from pathlib import Path
 
 from core import documents, settings
@@ -77,10 +78,33 @@ def start_parent_death_watchdog() -> None:
     threading.Thread(target=_watch, daemon=True).start()
 
 
+def start_app_heartbeat(interval: float = 10.0) -> None:
+    """앱이 켜져 있다는 신호를 PPT 워커에게 남긴다 (외부 워커를 쓰는 번들에서만).
+
+    워커는 큐가 비었고 이 신호가 끊기면 스스로 끝난다 — 앱을 닫은 뒤 워커가
+    좀비처럼 남지 않게. (core/presentation_worker.py 참고)
+    """
+    if os.environ.get("KAIROS_PRESENTATION_EXTERNAL_WORKER") != "1":
+        return
+    from core.presentation_worker import touch_app_heartbeat
+    root = _data_dir() / "presentations"
+
+    def _beat() -> None:
+        while True:
+            try:
+                touch_app_heartbeat(root)
+            except OSError:
+                pass
+            time.sleep(interval)
+
+    threading.Thread(target=_beat, daemon=True).start()
+
+
 def main(argv=None) -> int:
     server, info = build(argv)
     print(json.dumps(info), flush=True)  # 한 줄 핸드셰이크
     start_parent_death_watchdog()
+    start_app_heartbeat()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
