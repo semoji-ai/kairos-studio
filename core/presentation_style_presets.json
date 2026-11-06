@@ -6,8 +6,8 @@
     {
       "id": "cinematic-documentary",
       "name": "시네마틱 다큐멘터리",
-      "description": "자연스러운 인물과 실제 공간을 영화적 사진으로 표현합니다.",
-      "visual_dna": "Premium cinematic documentary photography, authentic human emotion and lived-in real spaces, 35mm lens at eye level, natural depth of field, warm directional window light, muted earth tones with deep forest green and restrained terracotta accents, gentle highlight roll-off, fine analog film grain, realistic skin and material texture, quiet contemplative editorial mood"
+      "description": "실제 공간과 인물을 그 자리의 빛과 자연스러운 대비로 담은 다큐멘터리 사진입니다.",
+      "visual_dna": "Unstaged documentary photograph made on a full-frame cinema camera with a 35mm prime lens at eye level, available light motivated by real sources within each scene, true-to-life contrast with soft shadow falloff that keeps detail in the shadows and gently rolled highlights, faithful natural color of the actual location, accurate skin tones with visible pores and fine natural texture, candid moments in authentic lived-in everyday spaces, subtle organic film-like grain"
     },
     {
       "id": "editorial-illustration",
@@ -67,8 +67,9 @@
         ],
         "image_direction": [
           "이미지는 장식이 아니라 슬라이드의 핵심 메시지를 전달하는 장면으로 사용한다.",
-          "덱 전체에서 동일한 렌즈, 조명, 색보정, 인물 표현을 유지한다.",
-          "따뜻한 자연광, 절제된 영화적 대비, 인간적인 표정과 실제 공간의 질감을 사용한다.",
+          "덱 전체에서 같은 카메라·렌즈·색 응답을 유지하되, 조명은 장면의 시간대와 장소를 따른다.",
+          "장면마다 실제 빛의 출처(창가 확산광, 저녁 실내 조명, 흐린 날 실외 등)를 정하고 사람 눈 수준의 자연스러운 대비와 실제 장소의 색을 쓴다.",
+          "연출되지 않은 순간, 행동 중인 손, 생활감 있는 공간의 구체적 디테일로 실제 사진처럼 보이게 한다.",
           "표지와 핵심 전환 페이지는 풀블리드 또는 강한 비대칭 크롭을 사용한다.",
           "이미지 안에는 제목이나 본문 문자를 생성하지 않는다."
         ],

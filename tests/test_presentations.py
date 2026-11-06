@@ -253,3 +253,40 @@ def test_manager_reads_utf8_bom_status_history(tmp_path):
     )
     assert manager.get("abc123abc123")["title"] == "보존된 PPT"
     assert manager.list()[0]["id"] == "abc123abc123"
+
+
+def test_hybrid_splits_art_direction_and_build():
+    # 기본은 Opus(설계·이미지 프롬프트) + Codex(제작)
+    from core.presentations import normalize_provider, phase_providers
+    assert normalize_provider(None) == "hybrid"
+    assert normalize_provider("nope") == "hybrid"
+    assert phase_providers("hybrid") == ("claude", "codex")
+    assert phase_providers("codex") == ("codex", "codex")
+    assert phase_providers("claude") == ("claude", "claude")
+
+
+def test_new_job_defaults_to_hybrid(tmp_path):
+    manager = PresentationManager(tmp_path, external_worker=True)
+    job = manager.create("lecture.md", b"# lecture", {})
+    assert job["provider"] == "hybrid"
+    assert job["options"]["provider"] == "hybrid"
+
+
+def test_plan_prompt_is_art_direction_with_natural_image_craft(tmp_path):
+    args = (tmp_path / "project", tmp_path / "ppt-master", tmp_path / "presentation_fleet.py",
+            tmp_path / "codex_imagegen_runner.py", tmp_path / "prompt-kit",
+            {"use_ai_images": True, "slide_count": 10})
+    plan = PresentationManager._agent_prompt(*args, phase="plan")
+    execute = PresentationManager._agent_prompt(*args, phase="execute")
+    assert "아트 디렉터" in plan
+    assert "빛의 출처" in plan and "자연스러운 대비" in plan
+    # 제작 QA 세부 규칙은 설계자에게 주지 않는다 — 판단을 맡긴다
+    assert "y = circle cy" not in plan
+    assert "제작자" in execute and "y = circle cy" in execute
+
+
+def test_cinematic_visual_dna_leaves_lighting_to_each_scene():
+    dna = get_image_style("cinematic-documentary")["visual_dna"]
+    assert "motivated by real sources" in dna
+    # 모든 장면에 같은 조명·색을 강제하던 문구는 빠졌다
+    assert "window light" not in dna and "terracotta" not in dna

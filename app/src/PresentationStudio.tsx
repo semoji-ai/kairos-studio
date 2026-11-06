@@ -10,6 +10,10 @@ const styleLabels: Record<string, string> = {
   adaptive: "자동 설계",
 };
 
+const providerLabels: Record<string, string> = {
+  hybrid: "설계 Opus · 제작 Codex", claude: "Opus", codex: "Codex",
+};
+
 export default function PresentationStudio() {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
@@ -19,7 +23,8 @@ export default function PresentationStudio() {
   const [tone, setTone] = useState("명료하고 현대적인 교육 자료");
   const [stylePreset, setStylePreset] = useState("quiet-cinematic-editorial");
   const [imageStyle, setImageStyle] = useState("cinematic-documentary");
-  const [provider, setProvider] = useState<"codex" | "claude">("codex");
+  // hybrid = Opus가 아트 디렉션(디자인·이미지 프롬프트), Codex가 제작
+  const [provider, setProvider] = useState<"hybrid" | "codex" | "claude">("hybrid");
   const [aiImages, setAiImages] = useState(true);
   const [notes, setNotes] = useState(true);
   const [jobs, setJobs] = useState<PresentationJob[]>([]);
@@ -116,8 +121,9 @@ export default function PresentationStudio() {
             <label>화면 비율<select value={aspect} onChange={e => setAspect(e.target.value as "16:9" | "4:3")}>
               <option value="16:9">16:9 와이드</option><option value="4:3">4:3 표준</option>
             </select></label>
-            <label>설계 에이전트<select value={provider} onChange={e => setProvider(e.target.value as "codex" | "claude")}>
-              <option value="codex">Codex</option><option value="claude">Claude</option>
+            <label>제작 에이전트<select value={provider} onChange={e => setProvider(e.target.value as "hybrid" | "codex" | "claude")}>
+              <option value="hybrid">설계 Opus · 제작 Codex (추천)</option>
+              <option value="claude">Opus만</option><option value="codex">Codex만</option>
             </select></label>
             <label className="span-2">디자인 스타일<select value={stylePreset} onChange={e => {
               const next = e.target.value;
@@ -156,7 +162,7 @@ export default function PresentationStudio() {
           <div className="job-list">
             {!jobs.length && <div className="empty-jobs"><Emoji name="empty" size={64} /><p>아직 제작한 PPT가 없습니다.</p></div>}
             {jobs.map(job => <article className="job-item" key={job.id}>
-              <div className="job-row"><div><strong>{job.title}</strong><small>{job.source_name} · {job.provider} · {styleLabels[job.options?.style_preset ?? ""] ?? job.options?.tone ?? "기존 스타일"}</small>
+              <div className="job-row"><div><strong>{job.title}</strong><small>{job.source_name} · {providerLabels[job.provider] ?? job.provider} · {styleLabels[job.options?.style_preset ?? ""] ?? job.options?.tone ?? "기존 스타일"}</small>
                 {job.options?.image_style && <small>AI 이미지 · {engines?.image_styles?.find(style => style.id === job.options?.image_style)?.name ?? job.options.image_style}</small>}
                 <small>{new Date(job.created_at).toLocaleString("ko-KR")}</small></div>
                 <span className={`job-status ${job.status}`}>{labels[job.status]}</span></div>
