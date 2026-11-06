@@ -87,7 +87,49 @@ def test_app_server_params_and_windows_hidden_window(monkeypatch):
     thread = next(m for m in sent if m.get("id") == 1)
     turn = next(m for m in sent if m.get("id") == 2)
     assert thread["params"]["sandbox"] == "workspace-write"
-    assert thread["params"]["model"] == "gpt-5.5"
+    # 모델은 각 PC Codex 기본값을 쓴다 — 앱이 박아 넣지 않는다
+    assert "model" not in thread["params"]
     assert thread["params"]["approvalPolicy"] == "never"
-    assert turn["params"]["model"] == "gpt-5.5"
+    assert "model" not in turn["params"]
     assert turn["params"]["effort"] == "medium"
+
+
+def test_codex_model_override_from_env(monkeypatch):
+    # 꼭 특정 모델을 써야 하면 KAIROS_CODEX_MODEL 로 지정한다
+    from core.providers import codex
+    stdin = io.StringIO()
+
+    class FakeProc:
+        def __init__(self):
+            self.stdin = stdin
+            self.stdout = io.StringIO(
+                '{"id":1,"result":{"thread":{"id":"t"},"model":"m-default"}}\n'
+                '{"id":2,"result":{"turn":{"id":"u"}}}\n'
+                '{"method":"item/started","params":{"item":{"id":"i","type":"agentMessage","phase":"final_answer"}}}\n'
+                '{"method":"item/agentMessage/delta","params":{"itemId":"i","delta":"ok"}}\n'
+                '{"method":"turn/completed","params":{"turn":{"status":"completed"}}}\n')
+            self.stderr = io.StringIO("")
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+    monkeypatch.setattr(codex, "_base_cmd", lambda: ["codex"])
+    monkeypatch.setattr(codex.subprocess, "Popen", lambda cmd, **kw: FakeProc())
+    monkeypatch.setenv("KAIROS_CODEX_MODEL", "gpt-x-test")
+    done = list(codex.chat("hi"))[-1]
+    sent = [json.loads(line) for line in stdin.getvalue().splitlines()]
+    assert next(m for m in sent if m.get("id") == 1)["params"]["model"] == "gpt-x-test"
+    assert next(m for m in sent if m.get("id") == 2)["params"]["model"] == "gpt-x-test"
+    assert done["model"] == "gpt-x-test"
+    # 지정이 없으면 Codex가 고른 모델을 기록한다
+    monkeypatch.delenv("KAIROS_CODEX_MODEL")
+    stdin.seek(0); stdin.truncate()
+    assert list(codex.chat("hi"))[-1]["model"] == "m-default"

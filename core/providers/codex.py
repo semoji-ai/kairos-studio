@@ -8,8 +8,14 @@ import subprocess
 from pathlib import Path
 from typing import Iterator
 
-MODEL = "gpt-5.5"
+# 모델은 앱이 정하지 않고 각 PC Codex의 기본값(로그인 계정 + ~/.codex/config.toml)을 쓴다.
+# 앱에 박아 두면 Codex가 그 모델 지원을 끊는 순간 PPT·채팅이 통째로 멈춘다
+# (2026-11-05 실측: ChatGPT 계정 Codex에서 "gpt-5.5 … not supported"). 꼭 필요하면 env로 지정.
 REASONING_EFFORT = "medium"
+
+
+def _model_override() -> str | None:
+    return os.environ.get("KAIROS_CODEX_MODEL") or None
 
 
 def _base_cmd() -> list[str] | None:
@@ -75,8 +81,10 @@ def chat(prompt: str, session_ref: str | None = None,
                            "version": "0.1.0"}}})
         _send(proc, {"method": "initialized", "params": {}})
         thread_method = "thread/resume" if session_ref else "thread/start"
-        thread_params = {"model": MODEL, "cwd": cwd, "sandbox": sandbox,
-                         "approvalPolicy": "never"}
+        model = _model_override()
+        thread_params = {"cwd": cwd, "sandbox": sandbox, "approvalPolicy": "never"}
+        if model:
+            thread_params["model"] = model
         if session_ref:
             thread_params["threadId"] = session_ref
         _send(proc, {"method": thread_method, "id": 1, "params": thread_params})
@@ -91,14 +99,18 @@ def chat(prompt: str, session_ref: str | None = None,
                 if msg.get("error"):
                     yield {"type": "error", "error": f"codex thread failed: {msg['error']}"}
                     return
-                thread_id = ((msg.get("result") or {}).get("thread") or {}).get("id") or session_ref
+                result = msg.get("result") or {}
+                thread_id = (result.get("thread") or {}).get("id") or session_ref
+                model = model or result.get("model")  # Codex가 실제로 고른 모델 (기록용)
                 if not thread_id:
                     yield {"type": "error", "error": "codex returned no thread id"}
                     return
-                _send(proc, {"method": "turn/start", "id": 2, "params": {
-                    "threadId": thread_id,
-                    "input": [{"type": "text", "text": prompt}],
-                    "model": MODEL, "effort": REASONING_EFFORT, "cwd": cwd}})
+                turn_params = {"threadId": thread_id,
+                               "input": [{"type": "text", "text": prompt}],
+                               "effort": REASONING_EFFORT, "cwd": cwd}
+                if _model_override():
+                    turn_params["model"] = _model_override()
+                _send(proc, {"method": "turn/start", "id": 2, "params": turn_params})
                 turn_started = True
                 continue
             if msg.get("id") == 2:
@@ -164,7 +176,7 @@ def chat(prompt: str, session_ref: str | None = None,
         else:
             yield {"type": "done", "text": "".join(final_parts),
                    "log": "".join(log_parts),
-                   "session_ref": thread_id, "model": MODEL}
+                   "session_ref": thread_id, "model": model or "codex"}
     except (BrokenPipeError, OSError) as exc:
         yield {"type": "error", "error": f"codex app-server failed: {exc}"}
     finally:

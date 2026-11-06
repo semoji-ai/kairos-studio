@@ -54,13 +54,23 @@ def test_permission_mode_default_without_cfg(monkeypatch):
     assert argv[argv.index("--permission-mode") + 1] == "default"
 
 
-def test_model_is_opus_5_5_at_high_effort(monkeypatch):
+def test_model_follows_latest_opus_alias_at_high_effort(monkeypatch):
+    # 모델 이름을 박지 않고 별칭 opus — CLI가 최신 Opus로 풀어 준다
     monkeypatch.setenv("KAIROS_CLAUDE_CMD", f"{sys.executable} {FAKE_ARGV}")
+    monkeypatch.delenv("KAIROS_CLAUDE_MODEL", raising=False)
     from core.providers import claude
     done = list(claude.chat("hi"))[-1]
     argv = _json.loads(done["text"])
-    assert argv[argv.index("--model") + 1] == "claude-opus-5-5"
+    assert argv[argv.index("--model") + 1] == "opus"
     assert argv[argv.index("--effort") + 1] == "high"
+
+
+def test_claude_model_override_from_env(monkeypatch):
+    monkeypatch.setenv("KAIROS_CLAUDE_CMD", f"{sys.executable} {FAKE_ARGV}")
+    monkeypatch.setenv("KAIROS_CLAUDE_MODEL", "claude-test-model")
+    from core.providers import claude
+    argv = _json.loads(list(claude.chat("hi"))[-1]["text"])
+    assert argv[argv.index("--model") + 1] == "claude-test-model"
 
 
 def test_windows_subprocess_has_no_console_window(monkeypatch):

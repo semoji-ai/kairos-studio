@@ -23,7 +23,14 @@ _INTERPRETERS = ["py -3", "py", "python", "python3"]
 # 권한 매칭이 통째로 빗나가므로 대표 인터프리터에 한해 같이 허용한다.
 _ENV_PREFIXED = ["PYTHONIOENCODING=utf-8 py -3"]
 
-MODEL = "claude-opus-5-5"
+# 모델 이름을 박지 않고 CLI 별칭 "opus"를 쓴다 — Claude Code가 그 계정에서 쓸 수 있는
+# 최신 Opus로 풀어 준다(2026-11 기준 claude-opus-5-5). 새 Opus가 나와 CLI가 업데이트되면
+# 앱을 다시 빌드하지 않아도 따라간다. 특정 모델이 필요하면 KAIROS_CLAUDE_MODEL로 지정.
+MODEL_ALIAS = "opus"
+
+
+def model_name() -> str:
+    return os.environ.get("KAIROS_CLAUDE_MODEL") or MODEL_ALIAS
 
 # 로그인이 풀렸을 때 CLI는 결과를 is_error로 내고 "Not logged in · Please run /login"
 # 같은 문구를 돌려준다 (assistant 메시지의 error는 "authentication_failed").
@@ -85,7 +92,7 @@ def chat(prompt: str, session_ref: str | None = None,
         "-p", prompt,
         "--output-format", "stream-json",
         "--verbose",
-        "--model", MODEL,
+        "--model", model_name(),
         "--effort", EFFORT,
         "--include-partial-messages",
         "--permission-mode", mode,  # 안전: 비대화 모드에서 위험 툴 거부
