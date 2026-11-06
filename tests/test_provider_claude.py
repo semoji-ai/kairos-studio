@@ -191,3 +191,13 @@ def test_open_login_command_runs_auth_login(monkeypatch):
     assert "claude auth login || pause" in cmd
     monkeypatch.setattr(setup.sys, "platform", "darwin")
     assert any("claude auth login" in part for part in setup.open_login_command())
+
+
+def test_claude_add_dirs_from_cfg(monkeypatch, tmp_path):
+    # PPT처럼 작업 폴더 밖 스킬 문서를 읽어야 하는 워크플로
+    monkeypatch.setenv("KAIROS_CLAUDE_CMD", f"{sys.executable} {FAKE_ARGV}")
+    from core.providers import claude
+    a, b = tmp_path / "ppt-master", tmp_path / "prompt-kit"
+    argv = _json.loads(list(claude.chat("hi", cfg={"claude_add_dirs": [str(a), str(b)]}))[-1]["text"])
+    pairs = list(zip(argv, argv[1:]))
+    assert ("--add-dir", str(a)) in pairs and ("--add-dir", str(b)) in pairs

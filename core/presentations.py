@@ -28,6 +28,24 @@ from core.presentation_styles import (
 _SUPPORTED = {".pdf", ".docx", ".hwp", ".hwpx", ".md", ".markdown"}
 _JOBS_LOCK = threading.Lock()
 
+# 역할 분담: hybrid = Opus(Claude)가 아트 디렉션(디자인 명세·이미지 프롬프트)을 잡고
+# Codex가 그 명세대로 슬라이드를 제작한다. 이미지는 어느 경우든 Codex 이미지 모델이 그린다.
+PROVIDERS = {"hybrid", "codex", "claude"}
+PROVIDER_LABELS = {"claude": "Opus", "codex": "Codex"}
+
+
+def normalize_provider(value) -> str:
+    value = str(value or "hybrid")
+    return value if value in PROVIDERS else "hybrid"
+
+
+def phase_providers(provider: str) -> tuple[str, str]:
+    """(설계 담당, 제작 담당) — 이미지 없는 한 번짜리 실행은 설계 담당이 맡는다."""
+    provider = normalize_provider(provider)
+    if provider == "hybrid":
+        return "claude", "codex"
+    return provider, provider
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -181,6 +199,7 @@ class PresentationManager:
         options["image_style"] = image_style["id"]
         if not str(options.get("tone") or "").strip():
             options["tone"] = style.get("tone") or "명료하고 현대적인 교육 자료"
+        options["provider"] = normalize_provider(options.get("provider"))
         job_id = uuid.uuid4().hex[:12]
         job_dir = self._job_dir(job_id)
         upload_dir = job_dir / "upload"
@@ -196,7 +215,7 @@ class PresentationManager:
             status="queued",
             stage="업로드 완료",
             progress=5,
-            provider=options.get("provider", "codex"),
+            provider=options["provider"],
             options=options,
             created_at=_now(),
             log=[],
@@ -375,9 +394,9 @@ class PresentationManager:
             runner = Path(__file__).resolve().parent / "codex_imagegen_runner.py"
             if not runner.is_file():
                 runner = (fleet_root / "runners" / "codex_imagegen_runner.py") if fleet_root else None
-            provider_name = str(options.get("provider", "codex"))
-            if provider_name not in {"codex", "claude"}:
-                provider_name = "codex"
+            plan_provider, build_provider = phase_providers(options.get("provider"))
+            plan_label = PROVIDER_LABELS[plan_provider]
+            build_label = PROVIDER_LABELS[build_provider]
             cfg = {
                 "workspace_dir": str(project),
                 "codex_sandbox": "workspace-write",
@@ -386,10 +405,12 @@ class PresentationManager:
                     f"Bash({sys.executable} {ppt_root / 'skills' / 'ppt-master' / 'scripts'}/*:*)",
                     f"Bash({sys.executable} {helper}:*)",
                 ],
+                # Claude는 헤드리스에서 작업 폴더 밖 문서를 읽으려면 미리 열어 둬야 한다
+                "claude_add_dirs": [str(d) for d in (ppt_root, prompt_kit) if d],
             }
             self._begin_stream_log(job_id)
 
-            def run_agent(agent_prompt: str, stage: str, progress: int):
+            def run_agent(agent_prompt: str, stage: str, progress: int, provider_name: str):
                 self._write_status(
                     job_id, stage=stage, progress=progress, project_dir=str(project),
                 )
@@ -456,8 +477,9 @@ class PresentationManager:
                         project, ppt_root, helper, runner, prompt_kit, options,
                         phase="plan",
                     ),
-                    f"{provider_name}가 슬라이드와 이미지 설계 중",
+                    f"{plan_label}가 슬라이드·이미지 아트 디렉션 중",
                     40,
+                    plan_provider,
                 )
                 image_manifest = project / "images" / "image_prompts.json"
                 if not image_manifest.is_file():
@@ -509,8 +531,9 @@ class PresentationManager:
                         project, ppt_root, helper, runner, prompt_kit, options,
                         phase="execute",
                     ),
-                    f"{provider_name}가 PowerPoint 제작 중",
+                    f"{build_label}가 슬라이드 제작 중",
                     66,
+                    build_provider,
                 )
                 self._write_status(
                     job_id, stage="PPTX 내보내기 중", progress=94,
@@ -521,8 +544,9 @@ class PresentationManager:
                     self._agent_prompt(
                         project, ppt_root, helper, runner, prompt_kit, options,
                     ),
-                    f"{provider_name}가 슬라이드 설계 중",
+                    f"{plan_label}가 슬라이드 설계·제작 중",
                     40,
+                    plan_provider,
                 )
 
             exports = sorted(project.glob("exports/*.pptx"),
@@ -542,35 +566,59 @@ class PresentationManager:
     def _agent_prompt(project: Path, ppt_root: Path, helper: Path,
                       runner: Path | None, prompt_kit: Path | None,
                       options: dict, phase: str = "full") -> str:
-        image_instruction = "원본 문서에서 추출된 이미지만 사용하세요."
-        if options.get("use_ai_images", True) and runner and prompt_kit:
-            target_assets = max(3, min(6, (int(options.get("slide_count") or 10) + 1) // 2))
-            if phase == "execute":
-                image_instruction = (
-                    "독립 백그라운드 워커가 `images/image_prompts.json`의 모든 AI 이미지를 "
-                    "이미 생성했고 각 항목을 `Generated`로 검증했습니다. manifest와 실제 PNG를 "
-                    "읽어 계획된 슬라이드에 배치하세요. 이미지 프롬프트를 수정하거나 Fleet, "
-                    "imagegen, image_gen.py를 다시 실행하지 마세요. 기존 `design_spec.md`와 "
-                    "`spec_lock.md`를 이어받아 SVG 제작, 검증, 후처리, PPTX export를 완료하세요."
-                )
-            else:
-                image_instruction = (
+        """단계별 에이전트 지시문.
+
+        plan(설계) — 아트 디렉터: 원고를 읽고 디자인 명세와 이미지 프롬프트를 잡는다
+                     (hybrid 모드에서는 Opus). 세부 레이아웃 규칙으로 묶지 않고 판단을 맡긴다.
+        execute(제작) — 명세를 그대로 구현하는 제작자 (hybrid 모드에서는 Codex).
+                     PowerPoint 변환에서 실제로 깨졌던 지점의 QA 규칙은 여기서만 준다.
+        """
+        use_ai = bool(options.get("use_ai_images", True) and runner and prompt_kit)
+        target_assets = max(3, min(6, (int(options.get("slide_count") or 10) + 1) // 2))
+
+        image_craft = (
+            "## 이미지 프롬프트 작성 원칙 — 'AI 사진'처럼 보이지 않게\n"
+            "생성 이미지가 흔히 AI처럼 보이는 이유는 모든 장면에 같은 조명, 과한 대비와 채도, "
+            "매끈한 피부, 정면 중앙 포즈, 비어 있는 듯 깨끗한 공간이 반복되기 때문입니다. "
+            "실제 사진가가 현장에서 찍은 것처럼 쓰세요.\n"
+            "- 빛: 장면마다 빛의 출처를 먼저 정하고 그 빛으로만 묘사하세요 "
+            "(예: 흐린 오전 창으로 들어오는 확산광, 늦은 오후 낮게 깔리는 햇빛, 저녁 식탁 위 "
+            "백열 펜던트등, 교실 형광등과 창가 자연광의 섞임). 시간대·날씨·실내외가 다르면 "
+            "빛도 달라야 합니다. 덱의 통일감은 아래 Visual DNA(카메라·색 응답)가 맡습니다.\n"
+            "- 대비: 사람 눈으로 보는 수준의 자연스러운 대비 — 그림자는 깊되 안의 디테일이 "
+            "보이고, 하이라이트는 부드럽게 넘어가게. HDR처럼 모든 곳이 밝은 화면, 과포화, "
+            "청록-주황 색보정 대신 실제 장소의 색을 그대로 기술하세요.\n"
+            "- 사람: 연출되지 않은 순간 — 무언가를 하고 있는 손, 서로를 보거나 다른 곳을 보는 "
+            "시선, 사선 시점, 프레임 가장자리에 걸린 인물. 피부는 결과 잔주름, 옷은 구김과 "
+            "닳은 자국까지 보이게.\n"
+            "- 공간: 생활감 있는 실제 장소의 구체적 디테일(손때 묻은 책상, 벽의 달력, 반쯤 "
+            "마신 찻잔)을 두세 가지 넣으세요. 원고 내용(가정·교회·교실 등)에 맞는 한국의 "
+            "일상 공간이면 더 좋습니다.\n"
+            "- 표현: Prompt Kit tier 0 검증 때문에 prompt 안에서는 영어 부정 표현 "
+            "(`no`, `without`, `avoid`, `exclude`, `never`, `free of`, `devoid of`, `do not`, "
+            "`don't`)을 쓰지 말고 원하는 상태만 긍정형으로 쓰세요. 이미지 안에 글자는 넣지 "
+            "않습니다(제목·본문은 편집 가능한 SVG 텍스트).\n"
+        )
+
+        if use_ai and phase == "execute":
+            image_instruction = (
+                "독립 백그라운드 워커가 `images/image_prompts.json`의 모든 AI 이미지를 "
+                "이미 생성했고 각 항목을 `Generated`로 검증했습니다. manifest와 실제 PNG를 "
+                "읽어 계획된 슬라이드에 배치하세요. 이미지 프롬프트를 수정하거나 Fleet, "
+                "imagegen, image_gen.py를 다시 실행하지 마세요. 기존 `design_spec.md`와 "
+                "`spec_lock.md`를 이어받아 SVG 제작, 검증, 후처리, PPTX export를 완료하세요. "
+                "사진은 명세에 적힌 크롭·배치 그대로 쓰고, 색 오버레이나 필터로 톤을 바꾸지 마세요."
+            )
+        elif use_ai:
+            image_instruction = (
                 "AI 시각 자산 생성은 사용자가 선택한 필수 제작 단계이며 생략할 수 없습니다. "
-                f"이미지 목적과 배치가 확정되면 먼저 Prompt Kit `{prompt_kit / 'skills' / 'image-prompt' / 'SKILL.md'}`를 "
+                f"이미지 목적과 배치가 정해지면 Prompt Kit `{prompt_kit / 'skills' / 'image-prompt' / 'SKILL.md'}`를 "
                 "처음부터 끝까지 읽고, 라우팅 규칙에 따라 C12와 선택한 룩 프리셋 및 필요한 "
-                "참조 문서를 읽으세요. 각 거친 이미지 의도를 Prompt Kit 포맷 A의 완성 프롬프트로 "
-                "컴파일하고, 덱 전체에 동일한 DNA 블록을 적용하세요. 최종 prompt는 반드시 "
-                "`AR 16:9`로 끝나야 합니다. "
-                f"Strategist 단계에서 약 {target_assets}개의 핵심 시각 자산을 계획하세요. "
-                "최소한 표지용 고품질 히어로 이미지와 강의의 핵심 개념을 설명하는 일관된 스타일의 "
-                "삽화/장면 이미지를 포함하되, 단순 장식용 이미지를 모든 장에 반복하지 마세요. "
-                "사용자가 별도로 플랫 스타일을 요구하지 않았다면 구체적인 장소·인물·사물을 "
-                "주인공으로 삼고, 깊이 있는 조명·질감·원근을 결과 중심 문장으로 기술하세요. "
-                "추상적인 원·선·도형 대신 실제 장면이 화면을 채우도록 긍정형으로 서술하세요. "
-                "Prompt Kit tier 0 검증을 위해 영어 부정 표현 `no`, `without`, `avoid`, "
-                "`exclude`, `never`, `free of`, `devoid of`, `do not`, `don't`를 prompt에 "
-                "사용하지 말고, 원하는 시각 상태만 긍정형으로 표현하세요. "
-                "이미지 안에는 글자를 넣지 말고 제목과 본문은 편집 가능한 SVG 텍스트로 유지하세요. "
+                "참조 문서를 읽은 뒤 각 장면을 Prompt Kit 포맷 A의 완성 프롬프트로 쓰세요. "
+                "최종 prompt는 반드시 `AR 16:9`로 끝나야 합니다. "
+                f"약 {target_assets}개의 핵심 시각 자산을 계획하세요 — 표지 히어로 이미지와 "
+                "강의의 핵심 장면 위주로, 모든 장에 장식 이미지를 반복하지 마세요.\n"
+                + image_craft +
                 "맞춤형 스폿 아이콘이나 오브젝트가 꼭 필요하면 배경 분리가 쉬운 단색 배경의 독립 "
                 "피사체로 생성하고, 일반 UI 아이콘은 PPT Master의 벡터 아이콘을 사용하세요. "
                 "PPT Master 규칙대로 `design_spec.md`, `spec_lock.md`, "
@@ -579,16 +627,29 @@ class PresentationManager:
                 "아직 만들지 마세요. 필요한 이미지와 배치 설계가 끝나면 최종 답변을 정확히 "
                 "`KAIROS_IMAGE_PLAN_READY`로 마치세요. 이미지 생성은 독립 워커가 다음 단계에서 "
                 "수행합니다."
-                )
+            )
+        else:
+            image_instruction = "원본 문서에서 추출된 이미지만 사용하세요."
+
         if phase == "plan":
             route_instruction = (
-                "이번 단계에서는 Generate PPTX의 Strategist/이미지 계획 단계까지만 수행하세요."
+                "당신은 이 덱의 아트 디렉터입니다. 이번 단계에서는 Generate PPTX의 "
+                "Strategist/이미지 계획 단계까지만 수행하세요. 원고를 끝까지 읽고 강의의 흐름, "
+                "슬라이드별 역할, 타이포그래피·색·여백의 위계, 이미지의 장면과 배치를 직접 "
+                "판단해 정하세요. 아래 디자인 시스템은 출발점입니다 — 색과 서체는 지키되, "
+                "레이아웃과 구성은 오늘날 잘 만든 강연 자료(애플 키노트, TED, 고급 매거진 "
+                "편집)의 감각으로 원고에 맞게 새로 설계하세요. 제작자(다른 에이전트)가 이 명세만 "
+                "보고 그대로 구현할 수 있게 `design_spec.md`와 `spec_lock.md`에 슬라이드마다 "
+                "레이아웃·텍스트 위치·이미지 크롭을 구체적으로 적으세요."
             )
             finish_instruction = (
                 "SVG 검증이나 PPTX export는 수행하지 말고 이미지 계획 준비 완료를 알리세요."
             )
         elif phase == "execute":
             route_instruction = (
+                "당신은 제작자입니다. 아트 디렉터가 쓴 `design_spec.md`와 `spec_lock.md`를 "
+                "그대로 구현하세요 — 디자인 판단을 새로 하지 말고 명세의 레이아웃·위계·이미지 "
+                "크롭을 정확히 옮기는 데 집중하세요. "
                 "SVG 슬라이드, 발표자 노트, svg_final 산출물 생성과 검증까지만 수행하세요. "
                 "svg_to_pptx.py를 실행하거나 PPTX를 만들지 마세요. PPTX 내보내기는 "
                 "독립 카이로스 워커가 담당합니다."
@@ -599,11 +660,34 @@ class PresentationManager:
             )
         else:
             route_instruction = (
-                "Generate PPTX 경로를 끝까지 수행하여 exports/에 PPTX를 만드세요."
+                "원고를 끝까지 읽고 덱의 흐름과 디자인을 직접 판단해 설계한 뒤, Generate PPTX "
+                "경로를 끝까지 수행하여 exports/에 PPTX를 만드세요."
             )
             finish_instruction = (
                 "모든 SVG 검증과 후처리, PPTX export까지 완료한 뒤 결과 경로를 최종 답변에 적으세요."
             )
+
+        # PowerPoint 변환에서 실제로 깨졌던 지점들 — 슬라이드를 만드는 단계에서만 필요하다
+        build_qa = """
+## 제작 QA (PowerPoint 변환에서 실제로 깨졌던 지점)
+한글 원고가 주언어이면 구조적 제목·부제·본문은 설치된 `Noto Sans KR` 한 서체로
+통일하고, 제목 700·본문 400/500처럼 굵기로 위계를 만드세요. 한글 구조 텍스트에
+`Aptos`, `Aptos Display`, `Malgun Gothic`을 섞지 마세요. 제목과 부제는 각각 의도한
+모듈 폭을 가진 별도 프레임으로 두고, 실제 한글 글자 폭을 기준으로 줄바꿈한 뒤 최소
+16px의 시각 간격을 확보하세요. 본문 프레임은 컨테이너 안쪽 여백과 예상 줄 수를
+반영한 폭·높이를 가져야 하며 글자가 카드 밖으로 잘리면 안 됩니다.
+FLOW·단계·수렴 다이어그램은 항목 중심점, 동일 간격, 연결선 시작/끝점, 결과 박스의
+수직 중심을 수치로 맞추고, 모든 라벨과 설명이 각 도형 안에서 완전히 보여야 합니다.
+숫자 원·배지는 숫자 글리프의 시각 중심을 원 중심에 맞추세요. SVG 텍스트 기준선은
+`y = circle cy + 약 0.32 × font-size`를 출발점으로 실제 렌더를 확인하세요. 카드 제목이
+넘치면 글자 크기를 과도하게 줄이지 말고 의미 단위로 수동 줄바꿈하고 카드 높이와 아래
+본문 위치를 함께 조정하세요. SVG 캔버스 검사 통과만으로 완료하지 말고 PowerPoint 변환
+후 텍스트 재배치까지 고려해 넉넉한 프레임을 설계하세요.
+원본 이미지는 의미와 출처를 유지해 우선 활용하되, 생성 이미지와 함께 쓰일 때는 동일한
+크롭 비율·모서리·여백 체계로 프레이밍해 한 덱의 시각 언어로 보이게 하세요. 표는
+가능하면 편집 가능한 표로 만드세요.
+""" if phase != "plan" else ""
+
         style_instruction = presentation_style_prompt(
             str(options.get("style_preset") or "")
         )
@@ -630,32 +714,13 @@ class PresentationManager:
 - 슬라이드 수: 약 {options.get('slide_count', 10)}장
 - 화면 비율: {options.get('aspect', '16:9')}
 - 분위기: {options.get('tone', '명료하고 현대적인 교육 자료')}
-- 저장된 디자인 시스템:
+- 디자인 시스템:
 {style_instruction}
 - AI 이미지 Visual DNA:
 {selected_image_style}
 - 외부 사실 조사: 하지 않음. 제공된 강의안만 사용
 - 발표자 노트: {bool(options.get('speaker_notes', True))}
-
-한글 원고가 주언어이면 구조적 제목·부제·본문은 설치된 `Noto Sans KR` 한 서체로
-통일하고, 제목 700·본문 400/500처럼 굵기로 위계를 만드세요. 한글 구조 텍스트에
-`Aptos`, `Aptos Display`, `Malgun Gothic`을 섞지 마세요. 제목과 부제는 각각 의도한
-모듈 폭을 가진 별도 프레임으로 두고, 실제 한글 글자 폭을 기준으로 줄바꿈한 뒤 최소
-16px의 시각 간격을 확보하세요. 본문 프레임은 컨테이너 안쪽 여백과 예상 줄 수를
-반영한 폭·높이를 가져야 하며 글자가 카드 밖으로 잘리면 안 됩니다.
-FLOW·단계·수렴 다이어그램은 항목 중심점, 동일 간격, 연결선 시작/끝점, 결과 박스의
-수직 중심을 수치로 맞추고, 모든 라벨과 설명이 각 도형 안에서 완전히 보여야 합니다.
-숫자 원·배지는 숫자 글리프의 시각 중심을 원 중심에 맞추세요. SVG 텍스트 기준선은
-`y = circle cy + 약 0.32 × font-size`를 출발점으로 실제 렌더를 확인하고, 원과 숫자가
-따로 떠 보이는 기준선 배치를 금지합니다. 카드 제목은 숫자 배지와 안쪽 여백을 뺀
-실제 가용 폭으로 측정하며, 넘치면 글자 크기를 과도하게 줄이지 말고 의미 단위로
-수동 줄바꿈하고 카드 높이와 아래 본문 위치를 함께 조정하세요.
-SVG 캔버스 검사 통과만으로 완료하지 말고 PowerPoint 변환 후 텍스트 재배치까지
-고려해 넉넉한 프레임을 설계하세요.
-
-원본 이미지는 의미와 출처를 유지해 우선 활용하되, 생성 이미지와 함께 쓰일 때는 동일한
-크롭 비율·모서리·여백·캡션·색상 오버레이 체계로 프레이밍해 한 덱의 시각 언어로
-보이게 하세요. 표는 가능하면 편집 가능한 표로 만드세요.
+{build_qa}
 {image_instruction}
 {finish_instruction}
 """.strip()

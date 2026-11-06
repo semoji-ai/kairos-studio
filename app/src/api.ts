@@ -221,7 +221,7 @@ export async function listReviews(): Promise<ReviewSummary[]> {
 export type PresentationJob = {
   id: string; title: string; source_name: string;
   status: "queued" | "running" | "completed" | "failed";
-  stage: string; progress: number; provider: "codex" | "claude";
+  stage: string; progress: number; provider: "hybrid" | "codex" | "claude";
   created_at: string; updated_at: string; log: string[];
   result?: string | null; error?: string | null;
   options?: { style_preset?: string; image_style?: string; tone?: string; slide_count?: number };
@@ -251,7 +251,7 @@ export async function createPresentation(
   file: File,
   options: {
     title: string; audience: string; slide_count: number; aspect: "16:9" | "4:3";
-    tone: string; provider: "codex" | "claude"; use_ai_images: boolean;
+    tone: string; provider: "hybrid" | "codex" | "claude"; use_ai_images: boolean;
     speaker_notes: boolean; style_preset: string; image_style: string;
   },
 ): Promise<PresentationJob> {

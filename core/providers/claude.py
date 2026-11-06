@@ -112,6 +112,11 @@ def chat(prompt: str, session_ref: str | None = None,
     out_dir = (cfg or {}).get("output_dir")
     if out_dir:
         cmd += ["--add-dir", str(Path(out_dir).expanduser())]
+    # 전용 워크플로(PPT 등)가 작업 폴더 밖의 읽기 자료(스킬 문서)를 넘길 수 있다 —
+    # 헤드리스에서는 작업 폴더 밖 파일을 읽으려면 미리 열어 둬야 한다.
+    for extra in (cfg or {}).get("claude_add_dirs", []):
+        if extra:
+            cmd += ["--add-dir", str(Path(extra).expanduser())]
     if session_ref:
         cmd += ["--resume", session_ref]
     ws = (cfg or {}).get("workspace_dir")
