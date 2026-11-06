@@ -290,3 +290,63 @@ def test_cinematic_visual_dna_leaves_lighting_to_each_scene():
     assert "motivated by real sources" in dna
     # 모든 장면에 같은 조명·색을 강제하던 문구는 빠졌다
     assert "window light" not in dna and "terracotta" not in dna
+
+
+def _completed_job(manager):
+    job = manager.create("lecture.md", "# 강의".encode("utf-8"), {"title": "부모 세미나", "provider": "codex"})
+    project = manager._job_dir(job["id"]) / "workspace" / "lecture_ppt169"
+    (project / "sources").mkdir(parents=True)
+    (project / "design_spec.md").write_text("# spec", encoding="utf-8")
+    manager._write_status(job["id"], status="completed", result="x.pptx")
+    return job
+
+
+def test_remake_creates_new_job_from_same_source(tmp_path):
+    manager = PresentationManager(tmp_path, external_worker=True)
+    parent = _completed_job(manager)
+    again = manager.remake(parent["id"], provider="hybrid")
+    assert again["id"] != parent["id"]
+    assert again["remade_from"] == parent["id"]
+    assert again["provider"] == "hybrid"  # 화면에서 고른 역할 분담으로
+    assert again["title"] == "부모 세미나"
+    src = manager._job_dir(again["id"]) / "upload" / again["source_name"]
+    assert src.read_text(encoding="utf-8") == "# 강의"
+    assert manager.get(parent["id"])["status"] == "completed"  # 원래 결과는 그대로
+
+
+def test_revise_copies_project_and_numbers_versions(tmp_path):
+    manager = PresentationManager(tmp_path, external_worker=True)
+    parent = _completed_job(manager)
+    v1 = manager.revise(parent["id"], "표지 사진을 더 밝게")
+    assert v1["title"] == "부모 세미나 (수정 1)"
+    assert v1["revision_of"] == parent["id"] and v1["revision"] == 1
+    assert v1["options"]["revision_request"] == "표지 사진을 더 밝게"
+    copied = manager._job_dir(v1["id"]) / "workspace" / "lecture_ppt169" / "design_spec.md"
+    assert copied.read_text(encoding="utf-8") == "# spec"
+    manager._write_status(v1["id"], status="completed")
+    v2 = manager.revise(v1["id"], "3번 제목 크게")
+    assert v2["title"] == "부모 세미나 (수정 2)" and v2["root_title"] == "부모 세미나"
+
+
+def test_revise_rejects_unfinished_or_empty(tmp_path):
+    import pytest as _pytest
+    manager = PresentationManager(tmp_path, external_worker=True)
+    queued = manager.create("lecture.md", b"# x", {})
+    with _pytest.raises(ValueError):
+        manager.revise(queued["id"], "고쳐 주세요")
+    parent = _completed_job(manager)
+    with _pytest.raises(ValueError):
+        manager.revise(parent["id"], "   ")
+
+
+def test_revision_prompts_keep_scope_and_new_image_filenames(tmp_path):
+    options = {"use_ai_images": True, "revision_request": "표지 사진을 아침 햇살로"}
+    args = (tmp_path / "p", tmp_path / "ppt", tmp_path / "helper.py", tmp_path / "runner.py",
+            tmp_path / "kit", options)
+    plan = PresentationManager._revision_prompt(*args, phase="plan")
+    execute = PresentationManager._revision_prompt(*args, phase="execute")
+    assert "표지 사진을 아침 햇살로" in plan and "표지 사진을 아침 햇살로" in execute
+    assert "요청한 부분만 바꾸고" in plan
+    assert "revision_plan.md" in plan and "KAIROS_REVISION_PLAN_READY" in plan
+    assert "cover_v2.png" in plan and "빛의 출처" in plan
+    assert "KAIROS_PPT_SOURCES_READY" in execute and "y = circle cy" in execute

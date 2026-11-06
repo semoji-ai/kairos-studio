@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +35,54 @@ PROVIDERS = {"hybrid", "codex", "claude"}
 PROVIDER_LABELS = {"claude": "Opus", "codex": "Codex"}
 
 
+# 'AI 사진'처럼 보이지 않게 — 설계(아트 디렉션)·수정 계획 단계에서 쓴다
+IMAGE_CRAFT = (
+    "## 이미지 프롬프트 작성 원칙 — 'AI 사진'처럼 보이지 않게\n"
+    "생성 이미지가 흔히 AI처럼 보이는 이유는 모든 장면에 같은 조명, 과한 대비와 채도, "
+    "매끈한 피부, 정면 중앙 포즈, 비어 있는 듯 깨끗한 공간이 반복되기 때문입니다. "
+    "실제 사진가가 현장에서 찍은 것처럼 쓰세요.\n"
+    "- 빛: 장면마다 빛의 출처를 먼저 정하고 그 빛으로만 묘사하세요 "
+    "(예: 흐린 오전 창으로 들어오는 확산광, 늦은 오후 낮게 깔리는 햇빛, 저녁 식탁 위 "
+    "백열 펜던트등, 교실 형광등과 창가 자연광의 섞임). 시간대·날씨·실내외가 다르면 "
+    "빛도 달라야 합니다. 덱의 통일감은 아래 Visual DNA(카메라·색 응답)가 맡습니다.\n"
+    "- 대비: 사람 눈으로 보는 수준의 자연스러운 대비 — 그림자는 깊되 안의 디테일이 "
+    "보이고, 하이라이트는 부드럽게 넘어가게. HDR처럼 모든 곳이 밝은 화면, 과포화, "
+    "청록-주황 색보정 대신 실제 장소의 색을 그대로 기술하세요.\n"
+    "- 사람: 연출되지 않은 순간 — 무언가를 하고 있는 손, 서로를 보거나 다른 곳을 보는 "
+    "시선, 사선 시점, 프레임 가장자리에 걸린 인물. 피부는 결과 잔주름, 옷은 구김과 "
+    "닳은 자국까지 보이게.\n"
+    "- 공간: 생활감 있는 실제 장소의 구체적 디테일(손때 묻은 책상, 벽의 달력, 반쯤 "
+    "마신 찻잔)을 두세 가지 넣으세요. 원고 내용(가정·교회·교실 등)에 맞는 한국의 "
+    "일상 공간이면 더 좋습니다.\n"
+    "- 표현: Prompt Kit tier 0 검증 때문에 prompt 안에서는 영어 부정 표현 "
+    "(`no`, `without`, `avoid`, `exclude`, `never`, `free of`, `devoid of`, `do not`, "
+    "`don't`)을 쓰지 말고 원하는 상태만 긍정형으로 쓰세요. 이미지 안에 글자는 넣지 "
+    "않습니다(제목·본문은 편집 가능한 SVG 텍스트).\n"
+)
+
+
+# PowerPoint 변환에서 실제로 깨졌던 지점들 — 슬라이드를 만드는 단계에서만 쓴다
+BUILD_QA = """
+## 제작 QA (PowerPoint 변환에서 실제로 깨졌던 지점)
+한글 원고가 주언어이면 구조적 제목·부제·본문은 설치된 `Noto Sans KR` 한 서체로
+통일하고, 제목 700·본문 400/500처럼 굵기로 위계를 만드세요. 한글 구조 텍스트에
+`Aptos`, `Aptos Display`, `Malgun Gothic`을 섞지 마세요. 제목과 부제는 각각 의도한
+모듈 폭을 가진 별도 프레임으로 두고, 실제 한글 글자 폭을 기준으로 줄바꿈한 뒤 최소
+16px의 시각 간격을 확보하세요. 본문 프레임은 컨테이너 안쪽 여백과 예상 줄 수를
+반영한 폭·높이를 가져야 하며 글자가 카드 밖으로 잘리면 안 됩니다.
+FLOW·단계·수렴 다이어그램은 항목 중심점, 동일 간격, 연결선 시작/끝점, 결과 박스의
+수직 중심을 수치로 맞추고, 모든 라벨과 설명이 각 도형 안에서 완전히 보여야 합니다.
+숫자 원·배지는 숫자 글리프의 시각 중심을 원 중심에 맞추세요. SVG 텍스트 기준선은
+`y = circle cy + 약 0.32 × font-size`를 출발점으로 실제 렌더를 확인하세요. 카드 제목이
+넘치면 글자 크기를 과도하게 줄이지 말고 의미 단위로 수동 줄바꿈하고 카드 높이와 아래
+본문 위치를 함께 조정하세요. SVG 캔버스 검사 통과만으로 완료하지 말고 PowerPoint 변환
+후 텍스트 재배치까지 고려해 넉넉한 프레임을 설계하세요.
+원본 이미지는 의미와 출처를 유지해 우선 활용하되, 생성 이미지와 함께 쓰일 때는 동일한
+크롭 비율·모서리·여백 체계로 프레이밍해 한 덱의 시각 언어로 보이게 하세요. 표는
+가능하면 편집 가능한 표로 만드세요.
+"""
+
+
 def normalize_provider(value) -> str:
     value = str(value or "hybrid")
     return value if value in PROVIDERS else "hybrid"
@@ -45,6 +94,22 @@ def phase_providers(provider: str) -> tuple[str, str]:
     if provider == "hybrid":
         return "claude", "codex"
     return provider, provider
+
+
+_IO_RETRIES = 20
+_IO_RETRY_SECONDS = 0.05
+
+
+def _replace_with_retry(src: Path, dst: Path) -> None:
+    """Windows에서는 누가 dst를 열어 둔 순간 교체가 PermissionError로 실패한다 — 잠깐 뒤 다시."""
+    for attempt in range(_IO_RETRIES):
+        try:
+            src.replace(dst)
+            return
+        except PermissionError:
+            if attempt + 1 == _IO_RETRIES:
+                raise
+            time.sleep(_IO_RETRY_SECONDS)
 
 
 def _now() -> str:
@@ -161,19 +226,29 @@ class PresentationManager:
             current["updated_at"] = _now()
             tmp = path.with_suffix(".tmp")
             tmp.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(path)
+            _replace_with_retry(tmp, path)
             return current
 
     def get(self, job_id: str) -> dict | None:
         if not re.fullmatch(r"[0-9a-f]{12}", job_id):
             return None
         path = self._status_path(job_id)
-        if not path.is_file():
-            return None
-        try:
-            return json.loads(path.read_text(encoding="utf-8-sig"))
-        except (OSError, json.JSONDecodeError):
-            return None
+        # 같은 프로세스의 쓰기와 겹치지 않게 잠그고, 다른 프로세스(PPT 워커)가 바꾸는 순간에
+        # 걸리면 잠깐 뒤 다시 읽는다 — Windows는 열려 있는 파일을 교체·읽기할 때 실패한다.
+        for attempt in range(_IO_RETRIES):
+            with _JOBS_LOCK:
+                if not path.is_file():
+                    if attempt + 1 < _IO_RETRIES and path.with_suffix(".tmp").is_file():
+                        pass  # 교체 중 — 다시 시도
+                    else:
+                        return None
+                else:
+                    try:
+                        return json.loads(path.read_text(encoding="utf-8-sig"))
+                    except (OSError, json.JSONDecodeError):
+                        pass
+            time.sleep(_IO_RETRY_SECONDS)
+        return None
 
     def list(self) -> list[dict]:
         jobs = []
@@ -184,7 +259,8 @@ class PresentationManager:
                 pass
         return sorted(jobs, key=lambda j: j.get("created_at", ""), reverse=True)
 
-    def create(self, filename: str, content: bytes, options: dict) -> dict:
+    def create(self, filename: str, content: bytes, options: dict,
+               prepare=None, extra: dict | None = None) -> dict:
         suffix = Path(filename).suffix.lower()
         if suffix not in _SUPPORTED:
             raise ValueError("PDF, DOCX, HWP, HWPX, MD 파일만 지원합니다")
@@ -207,6 +283,8 @@ class PresentationManager:
         safe_name = _safe_name(filename)
         source = upload_dir / safe_name
         source.write_bytes(content)
+        if prepare:
+            prepare(job_dir)  # 수정본: 원본 프로젝트를 복사해 둔다 (작업 시작 전에)
         status = self._write_status(
             job_id,
             id=job_id,
@@ -221,9 +299,60 @@ class PresentationManager:
             log=[],
             result=None,
             error=None,
+            **(extra or {}),
         )
         self._dispatch(job_id, source, options)
         return status
+
+    def remake(self, job_id: str, provider: str | None = None) -> dict:
+        """같은 원고·설정으로 새 작업을 만든다 (원래 결과는 그대로 남는다)."""
+        parent = self.get(job_id)
+        if not parent:
+            raise ValueError("작업을 찾을 수 없습니다")
+        if parent.get("status") in {"queued", "running"}:
+            raise ValueError("제작 중인 작업은 다시 만들 수 없습니다")
+        source = self._job_dir(job_id) / "upload" / str(parent["source_name"])
+        if not source.is_file():
+            raise ValueError("원본 업로드 파일을 찾을 수 없습니다")
+        options = {k: v for k, v in dict(parent.get("options") or {}).items()
+                   if k not in {"revision_request", "revision_of"}}
+        options["title"] = parent.get("root_title") or parent.get("title") or source.stem
+        if provider:
+            options["provider"] = provider
+        return self.create(parent["source_name"], source.read_bytes(), options,
+                           extra={"remade_from": job_id})
+
+    def revise(self, job_id: str, request: str) -> dict:
+        """완성된 덱에 수정 요청을 반영한 새 버전을 만든다 — 원본 프로젝트를 복사해서."""
+        parent = self.get(job_id)
+        if not parent:
+            raise ValueError("작업을 찾을 수 없습니다")
+        if parent.get("status") != "completed":
+            raise ValueError("완성된 작업만 수정할 수 있습니다")
+        request = str(request or "").strip()
+        if not request:
+            raise ValueError("수정할 내용을 적어 주세요")
+        if len(request) > 2000:
+            raise ValueError("수정 요청은 2,000자 이내로 적어 주세요")
+        parent_workspace = self._job_dir(job_id) / "workspace"
+        if not parent_workspace.is_dir():
+            raise ValueError("원본 PPT 프로젝트를 찾을 수 없습니다")
+        source = self._job_dir(job_id) / "upload" / str(parent["source_name"])
+        if not source.is_file():
+            raise ValueError("원본 업로드 파일을 찾을 수 없습니다")
+        revision = int(parent.get("revision") or 0) + 1
+        root_title = parent.get("root_title") or parent.get("title") or source.stem
+        options = dict(parent.get("options") or {})
+        options.update(revision_request=request, revision_of=job_id,
+                       title=f"{root_title} (수정 {revision})")
+
+        def copy_project(job_dir: Path):
+            shutil.copytree(parent_workspace, job_dir / "workspace")
+
+        return self.create(parent["source_name"], source.read_bytes(), options,
+                           prepare=copy_project,
+                           extra={"revision_of": job_id, "revision": revision,
+                                  "root_title": root_title, "revision_request": request})
 
     def retry(self, job_id: str) -> dict:
         current = self.get(job_id)
@@ -451,39 +580,9 @@ class PresentationManager:
                     ).strip()
                     raise RuntimeError(f"PPTX export failed: {detail[-2400:]}")
 
-            use_ai = bool(options.get("use_ai_images", True))
-            if use_ai:
-                if not runner or not runner.is_file() or not prompt_kit:
-                    raise RuntimeError("AI 이미지 생성 실행 파일을 찾을 수 없습니다")
-                selected_image_style = get_image_style(
-                    str(options.get("image_style") or "")
-                )
-                image_style_lock = project / "images" / "image_style_lock.json"
-                image_style_lock.write_text(
-                    json.dumps(
-                        {
-                            "version": 1,
-                            "image_style_id": selected_image_style["id"],
-                            "name": selected_image_style["name"],
-                            "visual_dna": selected_image_style["visual_dna"],
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    encoding="utf-8",
-                )
-                run_agent(
-                    self._agent_prompt(
-                        project, ppt_root, helper, runner, prompt_kit, options,
-                        phase="plan",
-                    ),
-                    f"{plan_label}가 슬라이드·이미지 아트 디렉션 중",
-                    40,
-                    plan_provider,
-                )
-                image_manifest = project / "images" / "image_prompts.json"
-                if not image_manifest.is_file():
-                    raise RuntimeError("이미지 설계 manifest가 생성되지 않았습니다")
+            def run_image_fleet(image_manifest: Path, image_style_lock: Path):
+                """manifest의 이미지를 독립 워커(Codex 이미지 모델)로 생성하고 결과를 검증한다.
+                이미 있는 PNG는 러너가 건너뛰므로 수정본에서는 바뀐 항목만 새로 그린다."""
                 self._write_status(
                     job_id, stage="독립 워커가 AI 이미지 생성 중 (0/5)", progress=48,
                 )
@@ -526,6 +625,68 @@ class PresentationManager:
                     stage=f"AI 이미지 생성 완료 ({len(image_items)}/{len(image_items)})",
                     progress=65,
                 )
+
+            use_ai = bool(options.get("use_ai_images", True))
+            if options.get("revision_request"):
+                # 수정본: 복사해 온 완성 프로젝트에 요청만 반영한다
+                run_agent(
+                    self._revision_prompt(project, ppt_root, helper, runner, prompt_kit,
+                                          options, phase="plan"),
+                    f"{plan_label}가 수정 요청 반영 계획 중", 40, plan_provider,
+                )
+                image_manifest = project / "images" / "image_prompts.json"
+                image_style_lock = project / "images" / "image_style_lock.json"
+                if (use_ai and runner and prompt_kit and image_manifest.is_file()
+                        and image_style_lock.is_file()):
+                    payload = json.loads(image_manifest.read_text(encoding="utf-8"))
+                    changed = [
+                        item for item in payload.get("items") or []
+                        if item.get("status") != "Generated"
+                        or not (project / "images" / Path(
+                            str(item.get("filename", ""))).name).is_file()
+                    ]
+                    if changed:
+                        run_image_fleet(image_manifest, image_style_lock)
+                run_agent(
+                    self._revision_prompt(project, ppt_root, helper, runner, prompt_kit,
+                                          options, phase="execute"),
+                    f"{build_label}가 슬라이드 수정 중", 66, build_provider,
+                )
+                self._write_status(job_id, stage="PPTX 내보내기 중", progress=94)
+                export_pptx()
+            elif use_ai:
+                if not runner or not runner.is_file() or not prompt_kit:
+                    raise RuntimeError("AI 이미지 생성 실행 파일을 찾을 수 없습니다")
+                selected_image_style = get_image_style(
+                    str(options.get("image_style") or "")
+                )
+                image_style_lock = project / "images" / "image_style_lock.json"
+                image_style_lock.write_text(
+                    json.dumps(
+                        {
+                            "version": 1,
+                            "image_style_id": selected_image_style["id"],
+                            "name": selected_image_style["name"],
+                            "visual_dna": selected_image_style["visual_dna"],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                run_agent(
+                    self._agent_prompt(
+                        project, ppt_root, helper, runner, prompt_kit, options,
+                        phase="plan",
+                    ),
+                    f"{plan_label}가 슬라이드·이미지 아트 디렉션 중",
+                    40,
+                    plan_provider,
+                )
+                image_manifest = project / "images" / "image_prompts.json"
+                if not image_manifest.is_file():
+                    raise RuntimeError("이미지 설계 manifest가 생성되지 않았습니다")
+                run_image_fleet(image_manifest, image_style_lock)
                 run_agent(
                     self._agent_prompt(
                         project, ppt_root, helper, runner, prompt_kit, options,
@@ -576,29 +737,6 @@ class PresentationManager:
         use_ai = bool(options.get("use_ai_images", True) and runner and prompt_kit)
         target_assets = max(3, min(6, (int(options.get("slide_count") or 10) + 1) // 2))
 
-        image_craft = (
-            "## 이미지 프롬프트 작성 원칙 — 'AI 사진'처럼 보이지 않게\n"
-            "생성 이미지가 흔히 AI처럼 보이는 이유는 모든 장면에 같은 조명, 과한 대비와 채도, "
-            "매끈한 피부, 정면 중앙 포즈, 비어 있는 듯 깨끗한 공간이 반복되기 때문입니다. "
-            "실제 사진가가 현장에서 찍은 것처럼 쓰세요.\n"
-            "- 빛: 장면마다 빛의 출처를 먼저 정하고 그 빛으로만 묘사하세요 "
-            "(예: 흐린 오전 창으로 들어오는 확산광, 늦은 오후 낮게 깔리는 햇빛, 저녁 식탁 위 "
-            "백열 펜던트등, 교실 형광등과 창가 자연광의 섞임). 시간대·날씨·실내외가 다르면 "
-            "빛도 달라야 합니다. 덱의 통일감은 아래 Visual DNA(카메라·색 응답)가 맡습니다.\n"
-            "- 대비: 사람 눈으로 보는 수준의 자연스러운 대비 — 그림자는 깊되 안의 디테일이 "
-            "보이고, 하이라이트는 부드럽게 넘어가게. HDR처럼 모든 곳이 밝은 화면, 과포화, "
-            "청록-주황 색보정 대신 실제 장소의 색을 그대로 기술하세요.\n"
-            "- 사람: 연출되지 않은 순간 — 무언가를 하고 있는 손, 서로를 보거나 다른 곳을 보는 "
-            "시선, 사선 시점, 프레임 가장자리에 걸린 인물. 피부는 결과 잔주름, 옷은 구김과 "
-            "닳은 자국까지 보이게.\n"
-            "- 공간: 생활감 있는 실제 장소의 구체적 디테일(손때 묻은 책상, 벽의 달력, 반쯤 "
-            "마신 찻잔)을 두세 가지 넣으세요. 원고 내용(가정·교회·교실 등)에 맞는 한국의 "
-            "일상 공간이면 더 좋습니다.\n"
-            "- 표현: Prompt Kit tier 0 검증 때문에 prompt 안에서는 영어 부정 표현 "
-            "(`no`, `without`, `avoid`, `exclude`, `never`, `free of`, `devoid of`, `do not`, "
-            "`don't`)을 쓰지 말고 원하는 상태만 긍정형으로 쓰세요. 이미지 안에 글자는 넣지 "
-            "않습니다(제목·본문은 편집 가능한 SVG 텍스트).\n"
-        )
 
         if use_ai and phase == "execute":
             image_instruction = (
@@ -618,7 +756,7 @@ class PresentationManager:
                 "최종 prompt는 반드시 `AR 16:9`로 끝나야 합니다. "
                 f"약 {target_assets}개의 핵심 시각 자산을 계획하세요 — 표지 히어로 이미지와 "
                 "강의의 핵심 장면 위주로, 모든 장에 장식 이미지를 반복하지 마세요.\n"
-                + image_craft +
+                + IMAGE_CRAFT +
                 "맞춤형 스폿 아이콘이나 오브젝트가 꼭 필요하면 배경 분리가 쉬운 단색 배경의 독립 "
                 "피사체로 생성하고, 일반 UI 아이콘은 PPT Master의 벡터 아이콘을 사용하세요. "
                 "PPT Master 규칙대로 `design_spec.md`, `spec_lock.md`, "
@@ -668,25 +806,7 @@ class PresentationManager:
             )
 
         # PowerPoint 변환에서 실제로 깨졌던 지점들 — 슬라이드를 만드는 단계에서만 필요하다
-        build_qa = """
-## 제작 QA (PowerPoint 변환에서 실제로 깨졌던 지점)
-한글 원고가 주언어이면 구조적 제목·부제·본문은 설치된 `Noto Sans KR` 한 서체로
-통일하고, 제목 700·본문 400/500처럼 굵기로 위계를 만드세요. 한글 구조 텍스트에
-`Aptos`, `Aptos Display`, `Malgun Gothic`을 섞지 마세요. 제목과 부제는 각각 의도한
-모듈 폭을 가진 별도 프레임으로 두고, 실제 한글 글자 폭을 기준으로 줄바꿈한 뒤 최소
-16px의 시각 간격을 확보하세요. 본문 프레임은 컨테이너 안쪽 여백과 예상 줄 수를
-반영한 폭·높이를 가져야 하며 글자가 카드 밖으로 잘리면 안 됩니다.
-FLOW·단계·수렴 다이어그램은 항목 중심점, 동일 간격, 연결선 시작/끝점, 결과 박스의
-수직 중심을 수치로 맞추고, 모든 라벨과 설명이 각 도형 안에서 완전히 보여야 합니다.
-숫자 원·배지는 숫자 글리프의 시각 중심을 원 중심에 맞추세요. SVG 텍스트 기준선은
-`y = circle cy + 약 0.32 × font-size`를 출발점으로 실제 렌더를 확인하세요. 카드 제목이
-넘치면 글자 크기를 과도하게 줄이지 말고 의미 단위로 수동 줄바꿈하고 카드 높이와 아래
-본문 위치를 함께 조정하세요. SVG 캔버스 검사 통과만으로 완료하지 말고 PowerPoint 변환
-후 텍스트 재배치까지 고려해 넉넉한 프레임을 설계하세요.
-원본 이미지는 의미와 출처를 유지해 우선 활용하되, 생성 이미지와 함께 쓰일 때는 동일한
-크롭 비율·모서리·여백 체계로 프레이밍해 한 덱의 시각 언어로 보이게 하세요. 표는
-가능하면 편집 가능한 표로 만드세요.
-""" if phase != "plan" else ""
+        build_qa = BUILD_QA if phase != "plan" else ""
 
         style_instruction = presentation_style_prompt(
             str(options.get("style_preset") or "")
@@ -723,4 +843,57 @@ FLOW·단계·수렴 다이어그램은 항목 중심점, 동일 간격, 연결�
 {build_qa}
 {image_instruction}
 {finish_instruction}
+""".strip()
+
+    @staticmethod
+    def _revision_prompt(project: Path, ppt_root: Path, helper: Path,
+                         runner: Path | None, prompt_kit: Path | None,
+                         options: dict, phase: str) -> str:
+        """완성된 덱의 수정본 지시문 — plan(수정 계획, 아트 디렉터) / execute(반영, 제작자)."""
+        request = str(options.get("revision_request") or "").strip()
+        common = f"""
+카이로스 PPT 수정 작업입니다. 아래 프로젝트는 이미 완성된 PPT Master 덱입니다.
+스킬 진입점: {ppt_root / 'skills' / 'ppt-master' / 'SKILL.md'}
+프로젝트: {project}
+사용자가 화면에서 아래 수정을 요청했습니다. 별도 확인 UI를 열거나 질문하지 마세요.
+
+<수정 요청>
+{request}
+</수정 요청>
+
+요청한 부분만 바꾸고 나머지 슬라이드·문구·이미지·디자인은 그대로 둡니다.
+모든 Python 스크립트는 `{sys.executable}` 인터프리터로 실행하세요. Windows PowerShell
+환경이므로 Bash heredoc을 쓰지 말고, 여러 줄 Python은 `.py` 파일로 만들어 실행하세요.
+live preview/Flask 서버나 브라우저를 시작하지 마세요.
+""".strip()
+        if phase == "plan":
+            image_rule = ""
+            if options.get("use_ai_images", True) and runner and prompt_kit:
+                image_rule = (
+                    "\n이미지를 바꿔야 하는 요청이면 `images/image_prompts.json`에서 해당 항목만 "
+                    "프롬프트를 고치고, **filename을 새 이름(예: `cover_v2.png`)으로 바꾸고 status를 "
+                    "`Pending`**으로 두세요. 원래 PNG는 지우지 마세요. 다른 항목은 `Generated` 그대로 "
+                    "둡니다. 새 프롬프트에도 기존 Visual DNA 문장을 그대로 넣고 `AR 16:9`로 끝내세요.\n"
+                    + IMAGE_CRAFT
+                )
+            return f"""{common}
+
+당신은 이 덱의 아트 디렉터입니다. 먼저 `design_spec.md`, `spec_lock.md`, `svg_output/`
+(또는 `svg_final/`), 발표자 노트를 읽고 요청이 어느 슬라이드·요소에 해당하는지 파악하세요.
+요청을 반영하도록 `design_spec.md`와 `spec_lock.md`를 갱신하고, 제작자가 그대로 따라 할 수
+있게 **`revision_plan.md`**에 슬라이드별로 무엇을 어떻게 바꿀지(문구·위치·크기·색·이미지
+파일명) 구체적으로 적으세요.{image_rule}
+이 단계에서는 이미지 생성(Fleet, imagegen, image_gen.py), SVG 수정, PPTX export를 하지 마세요.
+계획이 끝나면 최종 답변을 정확히 `KAIROS_REVISION_PLAN_READY`로 마치세요.
+""".strip()
+        return f"""{common}
+
+당신은 제작자입니다. 아트 디렉터가 쓴 `revision_plan.md`와 갱신된 `design_spec.md`·
+`spec_lock.md`대로 해당 슬라이드의 SVG만 수정하세요. 새 이미지가 있으면(manifest에서
+새 filename, status `Generated`) 계획에 적힌 슬라이드에서 그 파일로 바꾸세요. 디자인 판단을
+새로 하지 말고 계획을 정확히 옮기세요. 바뀐 슬라이드의 발표자 노트도 맞추고, SVG 검증과
+svg_final 재생성까지 하세요. svg_to_pptx.py를 실행하거나 PPTX를 만들지 마세요 —
+PPTX 내보내기는 독립 카이로스 워커가 담당합니다.
+{BUILD_QA}
+끝나면 최종 답변을 정확히 `KAIROS_PPT_SOURCES_READY`로 마치세요.
 """.strip()

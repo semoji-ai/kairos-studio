@@ -888,6 +888,13 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 .download-action:hover:not(:disabled) { background: var(--accent-hover); }
 .retry-action { width: 100%; margin-top: 12px; padding: 10px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line-strong); }
 .retry-action:disabled { cursor: default; opacity: .6; }
+/* 완성된 PPT: 다시 만들기 · 수정 요청 */
+.job-followup .presentation-result-actions .retry-action { margin-top: 8px; }
+.revise-box { display: grid; gap: 8px; margin-top: 10px; }
+.revise-box textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; resize: vertical; }
+.revise-box .primary-action { padding: 10px; }
+.revise-box small { color: var(--muted); font-size: 12px; }
+.job-revision { color: var(--ink-2); }
 .presentation-result-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .presentation-result-actions .download-action,
 .presentation-result-actions .retry-action { margin-top: 12px; }

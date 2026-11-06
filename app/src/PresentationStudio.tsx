@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { createPresentation, listPresentations, openPresentation, presentationEngines, retryPresentation } from "./api";
+import {
+  createPresentation, listPresentations, openPresentation, presentationEngines,
+  remakePresentation, retryPresentation, revisePresentation,
+} from "./api";
 import { Emoji } from "./emoji";
 import type { PresentationEngines, PresentationJob } from "./api";
 
@@ -9,6 +12,52 @@ const styleLabels: Record<string, string> = {
   "quiet-cinematic-editorial": "조용한 시네마틱 에디토리얼",
   adaptive: "자동 설계",
 };
+
+/** 완성된 작업 아래: 같은 원고로 다시 만들기 · 수정 요청으로 새 버전 만들기 */
+function JobFollowUp({ job, provider, onCreated, onError }: {
+  job: PresentationJob; provider: string;
+  onCreated: (job: PresentationJob) => void; onError: (message: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [request, setRequest] = useState("");
+  const [sending, setSending] = useState<"" | "remake" | "revise">("");
+
+  async function run(kind: "remake" | "revise") {
+    if (sending) return;
+    setSending(kind);
+    try {
+      const created = kind === "remake"
+        ? await remakePresentation(job.id, provider)
+        : await revisePresentation(job.id, request);
+      onCreated(created);
+      setRequest(""); setOpen(false);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "요청하지 못했습니다");
+    } finally {
+      setSending("");
+    }
+  }
+
+  return (
+    <div className="job-followup">
+      <div className="presentation-result-actions">
+        <button className="retry-action" disabled={!!sending}
+                title="같은 원고와 설정으로 새로 만듭니다 (지금 결과는 그대로 남습니다)"
+                onClick={() => run("remake")}>{sending === "remake" ? "시작하는 중…" : "다시 만들기"}</button>
+        <button className="retry-action" disabled={!!sending}
+                onClick={() => setOpen(v => !v)}>{open ? "수정 요청 닫기" : "수정 요청"}</button>
+      </div>
+      {open && <div className="revise-box">
+        <textarea value={request} maxLength={2000} rows={3} autoFocus
+                  placeholder="예: 표지 사진을 더 밝은 아침 분위기로, 3번 슬라이드 제목을 크게, 마지막 장 문구를 '함께 걸어가는 부모'로"
+                  onChange={e => setRequest(e.target.value)} />
+        <button className="primary-action" disabled={!request.trim() || !!sending}
+                onClick={() => run("revise")}>{sending === "revise" ? "시작하는 중…" : "수정본 만들기"}</button>
+        <small>요청한 부분만 고친 새 버전을 만듭니다. 지금 PPT는 그대로 남습니다.</small>
+      </div>}
+    </div>
+  );
+}
 
 const providerLabels: Record<string, string> = {
   hybrid: "설계 Opus · 제작 Codex", claude: "Opus", codex: "Codex",
@@ -164,7 +213,8 @@ export default function PresentationStudio() {
             {jobs.map(job => <article className="job-item" key={job.id}>
               <div className="job-row"><div><strong>{job.title}</strong><small>{job.source_name} · {providerLabels[job.provider] ?? job.provider} · {styleLabels[job.options?.style_preset ?? ""] ?? job.options?.tone ?? "기존 스타일"}</small>
                 {job.options?.image_style && <small>AI 이미지 · {engines?.image_styles?.find(style => style.id === job.options?.image_style)?.name ?? job.options.image_style}</small>}
-                <small>{new Date(job.created_at).toLocaleString("ko-KR")}</small></div>
+                <small>{new Date(job.created_at).toLocaleString("ko-KR")}</small>
+                {job.revision_request && <small className="job-revision">수정 요청: {job.revision_request}</small>}</div>
                 <span className={`job-status ${job.status}`}>{labels[job.status]}</span></div>
               <div className="progress-track"><span style={{ width: `${job.progress ?? 0}%` }} /></div>
               <div className="job-stage"><span>{job.stage}</span><b>{job.progress ?? 0}%</b></div>
@@ -203,6 +253,12 @@ export default function PresentationStudio() {
                   }
                 }}>폴더 열기</button>
               </div>}
+              {job.status === "completed" && <JobFollowUp job={job} provider={provider}
+                onCreated={created => {
+                  setJobs(old => [created, ...old]);
+                  setNotice(created.revision ? `수정본 제작을 시작했습니다 · ${created.title}` : `다시 만들기를 시작했습니다 · ${created.title}`);
+                }}
+                onError={message => setError(message)} />}
             </article>)}
           </div>
           {notice && <div className="ppt-notice">{notice}</div>}

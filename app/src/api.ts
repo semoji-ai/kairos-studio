@@ -225,6 +225,7 @@ export type PresentationJob = {
   created_at: string; updated_at: string; log: string[];
   result?: string | null; error?: string | null;
   options?: { style_preset?: string; image_style?: string; tone?: string; slide_count?: number };
+  revision?: number; revision_of?: string; revision_request?: string; remade_from?: string;
 };
 export type PresentationEngines = {
   ppt_master: { available: boolean; path: string | null };
@@ -285,6 +286,22 @@ export async function openPresentation(
   const payload = await r.json();
   if (!r.ok) throw new Error(payload.error ?? `HTTP ${r.status}`);
   return payload;
+}
+async function postPresentation(id: string, action: string, body: object): Promise<PresentationJob> {
+  const r = await fetch(`/presentations/${id}/${action}`, {
+    method: "POST", headers: HDRS, body: JSON.stringify(body),
+  });
+  const payload = await r.json();
+  if (!r.ok) throw new Error(payload.error ?? `HTTP ${r.status}`);
+  return payload;
+}
+/** 같은 원고·설정으로 새 작업 (원래 결과는 그대로) */
+export function remakePresentation(id: string, provider: string): Promise<PresentationJob> {
+  return postPresentation(id, "remake", { provider });
+}
+/** 완성된 덱에 수정 요청을 반영한 새 버전 */
+export function revisePresentation(id: string, request: string): Promise<PresentationJob> {
+  return postPresentation(id, "revise", { request });
 }
 export async function retryPresentation(id: string): Promise<PresentationJob> {
   const r = await fetch(`/presentations/${id}/retry`, {
