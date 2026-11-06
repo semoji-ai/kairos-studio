@@ -887,6 +887,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 .download-action { width: 100%; margin-top: 12px; padding: 10px; color: var(--on-accent); background: var(--accent); }
 .download-action:hover:not(:disabled) { background: var(--accent-hover); }
 .retry-action { width: 100%; margin-top: 12px; padding: 10px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line-strong); }
+.retry-action:disabled { cursor: default; opacity: .6; }
 .presentation-result-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .presentation-result-actions .download-action,
 .presentation-result-actions .retry-action { margin-top: 12px; }
