@@ -874,6 +874,18 @@ def make_server(host: str, port: int, token: str, store: Store) -> ThreadingHTTP
             body = self._body()
             if body is None:
                 return self._send(400, {"error": "bad json"})
+            # 완성된 PPT: 같은 원고로 다시 만들기 / 수정 요청으로 새 버전 만들기
+            m = re.fullmatch(r"/presentations/([0-9a-f]{12})/(remake|revise)", self.path)
+            if m:
+                manager = self._presentation_manager()
+                try:
+                    if m.group(2) == "remake":
+                        job = manager.remake(m.group(1), body.get("provider"))
+                    else:
+                        job = manager.revise(m.group(1), body.get("request"))
+                except (OSError, ValueError) as exc:
+                    return self._send(400, {"error": str(exc)})
+                return self._send(202, job)
             if self.path == "/learning/jobs":
                 ws, reason = self._learning_workspace()
                 if reason:

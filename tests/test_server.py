@@ -999,3 +999,34 @@ def test_open_login_does_not_reopen_within_a_minute(srv, monkeypatch):
     second = json.load(_req(url, "/setup/open-login", {}))
     assert first == {"ok": True}
     assert second == {"ok": True, "already_open": True}
+
+
+def test_presentation_remake_and_revise_routes(srv, monkeypatch):
+    url, _ = srv
+    monkeypatch.setenv("KAIROS_PRESENTATION_FAKE", "1")
+    created = json.load(_multipart_req(
+        url, "/presentations", "lesson.md", "# 강의\n".encode("utf-8"),
+        {"title": "부모 세미나", "provider": "codex", "slide_count": 8},
+    ))
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        job = json.load(_req(url, f"/presentations/{created['id']}"))
+        if job["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.05)
+    assert job["status"] == "completed", job
+
+    remade = json.load(_req(url, f"/presentations/{created['id']}/remake",
+                            {"provider": "hybrid"}, method="POST"))
+    assert remade["remade_from"] == created["id"] and remade["provider"] == "hybrid"
+
+    # 수정 요청: 빈 요청은 거절, 원본 프로젝트가 있으면 새 버전을 만든다
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _req(url, f"/presentations/{created['id']}/revise", {"request": " "}, method="POST")
+    assert exc.value.code == 400
+    job_dir = Path(job["project_dir"]).parent
+    (job_dir / "workspace" / "lecture_ppt169" / "sources").mkdir(parents=True)
+    revised = json.load(_req(url, f"/presentations/{created['id']}/revise",
+                             {"request": "표지를 더 밝게"}, method="POST"))
+    assert revised["title"] == "부모 세미나 (수정 1)"
+    assert revised["revision_request"] == "표지를 더 밝게"
