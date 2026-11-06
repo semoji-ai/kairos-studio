@@ -142,9 +142,14 @@ def test_manager_retries_failed_job(tmp_path, monkeypatch):
         if current and current["status"] == "completed":
             break
         time.sleep(0.05)
-    manager._write_status(job["id"], status="failed", error="forced")
+    manager._write_status(job["id"], status="failed", error="forced",
+                          log=["이전 실행 로그\n", "실패: forced\n"])
     retried = manager.retry(job["id"])
     assert retried["status"] in {"queued", "running", "completed"}
+    # 재시도하면 이전 실패 로그·오류는 화면에서 사라지고, 원인은 retry_history 에만 남는다
+    assert not any("forced" in line or "이전 실행" in line for line in retried["log"])
+    assert retried["error"] is None
+    assert retried["retry_history"][-1]["error"] == "forced"
     deadline = time.time() + 5
     while time.time() < deadline:
         current = manager.get(job["id"])
