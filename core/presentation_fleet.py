@@ -221,6 +221,9 @@ def run_fleet(manifest: Path, outdir: Path, runner: Path,
         "RAMP_EVERY": "1",
         "LAUNCH_STAGGER": "2",
         "TIMEOUT": str(timeout),
+        # 러너의 파일·출력 기본 인코딩을 UTF-8로 — Windows 기본(cp949)에서 한글이 깨진다
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
     })
     result = subprocess.run(
         [sys.executable, str(runner)],
