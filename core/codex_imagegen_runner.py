@@ -165,8 +165,15 @@ def run_one(item, scaler):
     scaler.success()
     return (pid, "ok", time.time()-before)
 
+def load_items(path):
+    """프롬프트 jsonl을 읽는다 — 인코딩을 꼭 지정한다. 지정하지 않으면 Windows가 cp949로
+    읽어 한글 프롬프트에서 UnicodeDecodeError로 멈춘다 (2026-11-06 PPT 이미지 단계 실패)."""
+    text = Path(path).read_text(encoding="utf-8-sig")
+    return [json.loads(l) for l in text.splitlines() if l.strip()]
+
+
 def main():
-    items = [json.loads(l) for l in PROMPTS.read_text().splitlines() if l.strip()]
+    items = load_items(PROMPTS)
     items = [it for it in items if not (OUTDIR/it["output_path"]).exists()]   # resume
     todo = len(items)
     if PARALLEL.isdigit():
