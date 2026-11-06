@@ -360,3 +360,62 @@ def test_revision_prompts_keep_scope_and_new_image_filenames(tmp_path):
     assert "revision_plan.md" in plan and "KAIROS_REVISION_PLAN_READY" in plan
     assert "cover_v2.png" in plan and "빛의 출처" in plan
     assert "KAIROS_PPT_SOURCES_READY" in execute and "y = circle cy" in execute
+
+
+def test_retry_resumes_from_failed_stage_when_stages_recorded(tmp_path):
+    manager = PresentationManager(tmp_path, external_worker=True)
+    job = manager.create("lecture.md", b"# x", {})
+    spec = manager._job_dir(job["id"]) / "workspace" / "p" / "design_spec.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# 설계", encoding="utf-8")
+    manager._write_status(job["id"], status="failed", error="이미지 실패",
+                          completed_stages=["plan"])
+    retried = manager.retry(job["id"])
+    assert spec.is_file()  # 끝낸 설계는 그대로 — 이미지 단계부터 이어 한다
+    assert retried["completed_stages"] == ["plan"]
+    assert "이어서" in retried["log"][0] and "설계" in retried["log"][0]
+
+
+def test_retry_without_recorded_stages_starts_fresh(tmp_path):
+    manager = PresentationManager(tmp_path, external_worker=True)
+    job = manager.create("lecture.md", b"# x", {})
+    stale = manager._job_dir(job["id"]) / "workspace" / "p" / "design_spec.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("# 깨진 설계", encoding="utf-8")
+    manager._write_status(job["id"], status="failed", error="실패")
+    retried = manager.retry(job["id"])
+    assert not stale.exists()
+    assert "처음부터" in retried["log"][0]
+
+
+def test_manifest_items_handles_missing_and_empty(tmp_path):
+    from core.presentations import manifest_items
+    assert manifest_items(tmp_path / "none.json") == []
+    path = tmp_path / "image_prompts.json"
+    path.write_text('{"items": []}', encoding="utf-8")
+    assert manifest_items(path) == []
+    path.write_text('{"items": [{"filename": "a.png"}]}', encoding="utf-8")
+    assert manifest_items(path) == [{"filename": "a.png"}]
+
+
+def test_fleet_starts_all_deck_images_at_once(tmp_path, monkeypatch):
+    from core import presentation_fleet as fleet
+    manifest = tmp_path / "images" / "image_prompts.json"
+    manifest.parent.mkdir()
+    manifest.write_text(json.dumps({"items": [
+        {"filename": f"img{i}.png", "prompt": f"Scene: {i}. AR 16:9", "aspect_ratio": "16:9"}
+        for i in range(5)]}), encoding="utf-8")
+    monkeypatch.setattr(fleet, "validate_prompts", lambda payload, kit: None)
+    captured = {}
+
+    class Done:
+        returncode = 0
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs.get("env") or {})
+        return Done()
+
+    monkeypatch.setattr(fleet.subprocess, "run", fake_run)
+    fleet.run_fleet(manifest, manifest.parent, tmp_path / "runner.py", tmp_path / "kit")
+    assert captured["START"] == "5"
+    assert captured["LAUNCH_STAGGER"] == "2"  # Codex 초기화는 여전히 2초 간격

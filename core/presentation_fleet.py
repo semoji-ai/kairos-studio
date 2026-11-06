@@ -214,10 +214,11 @@ def run_fleet(manifest: Path, outdir: Path, runner: Path,
         "PROMPTS": str(jsonl_path),
         "OUTDIR": str(outdir),
         "PARALLEL": parallel,
-        # Codex CLI initialization touches shared per-user state on Windows.
-        # Start conservatively, then let the fleet scaler grow after healthy
-        # completions while retaining its target/hard cap (up to 32).
-        "START": str(min(len(items), 2)),
+        # 덱 한 벌의 이미지(보통 3~6장)는 처음부터 모두 동시에 그린다 — 2장부터 늘려 가던
+        # 방식은 이미지 단계를 순서대로 기다리게 해 PPT 제작이 오래 걸렸다. Codex CLI
+        # 초기화가 Windows 사용자 공유 상태를 건드리는 문제는 LAUNCH_STAGGER(2초 간격 시작)가
+        # 계속 막고, 429 제한에 걸리면 러너의 스케일러가 스스로 줄인다.
+        "START": str(len(items)),
         "RAMP_EVERY": "1",
         "LAUNCH_STAGGER": "2",
         "TIMEOUT": str(timeout),

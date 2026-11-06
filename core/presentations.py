@@ -83,6 +83,17 @@ FLOW·단계·수렴 다이어그램은 항목 중심점, 동일 간격, 연결�
 """
 
 
+STAGE_LABELS = {"plan": "설계", "images": "AI 이미지", "build": "슬라이드 제작"}
+
+
+def manifest_items(path: Path) -> list[dict]:
+    """images/image_prompts.json 의 항목 — 파일이 없거나 깨졌으면 빈 목록."""
+    try:
+        return list(json.loads(Path(path).read_text(encoding="utf-8")).get("items") or [])
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
 def normalize_provider(value) -> str:
     value = str(value or "hybrid")
     return value if value in PROVIDERS else "hybrid"
@@ -376,17 +387,26 @@ class PresentationManager:
         source = self._job_dir(job_id) / "upload" / str(current["source_name"])
         if not source.is_file():
             raise ValueError("원본 업로드 파일을 찾을 수 없습니다")
+        # 끝낸 단계(설계·이미지·슬라이드)가 있으면 작업 폴더를 그대로 두고 실패한 단계부터
+        # 이어 한다. 끝낸 단계가 없으면(기록 이전 작업 포함) 폴더를 비우고 처음부터.
+        stages = [name for name in STAGE_LABELS if name in (current.get("completed_stages") or [])]
         workspace = self._job_dir(job_id) / "workspace"
-        if workspace.is_dir():
+        if not stages and workspace.is_dir():
             shutil.rmtree(workspace)
-        # 재시도는 새로 시작한다 — 화면에 남던 이전 실패 로그·오류는 지우고, 원인 추적용으로
-        # 마지막 몇 번의 실패 기록만 retry_history 에 남긴다 (화면에는 보이지 않음).
+        if stages:
+            message = ("실패한 단계부터 이어서 다시 시작합니다 (끝낸 단계: "
+                       + ", ".join(STAGE_LABELS[name] for name in stages) + ")\n")
+        else:
+            message = "작업을 처음부터 다시 시작합니다\n"
+        # 화면에 남던 이전 실패 로그·오류는 지우고, 원인 추적용으로 마지막 몇 번의 실패
+        # 기록만 retry_history 에 남긴다 (화면에는 보이지 않음).
         history = list(current.get("retry_history") or [])
         if current.get("error"):
             history.append({"at": _now(), "error": str(current["error"])[:2000]})
-        self._write_status(job_id, status="queued", stage="재시도 대기 중", progress=5,
-                           error=None, recover_attempts=0, retry_history=history[-5:],
-                           log=["작업을 처음부터 다시 시작합니다\n"])
+        self._write_status(job_id, status="queued",
+                           stage="실패한 단계부터 재시도 대기 중" if stages else "재시도 대기 중",
+                           progress=5, error=None, recover_attempts=0,
+                           retry_history=history[-5:], log=[message])
         self._dispatch(job_id, source, dict(current.get("options") or {}))
         return self.get(job_id) or current
 
@@ -640,75 +660,105 @@ class PresentationManager:
                 )
 
             use_ai = bool(options.get("use_ai_images", True))
+            # 끝난 단계 기록 — 실패 뒤 '다시 시도'는 끝난 단계를 건너뛰고 이어서 한다
+            done = set((self.get(job_id) or {}).get("completed_stages") or [])
+
+            def stage(name: str) -> bool:
+                if name in done:
+                    self._log(job_id, f"이전에 끝낸 '{STAGE_LABELS[name]}' 단계를 이어 씁니다\n")
+                    return False
+                return True
+
+            def mark(name: str):
+                done.add(name)
+                self._write_status(job_id, completed_stages=sorted(done))
+
             if options.get("revision_request"):
                 # 수정본: 복사해 온 완성 프로젝트에 요청만 반영한다
-                run_agent(
-                    self._revision_prompt(project, ppt_root, helper, runner, prompt_kit,
-                                          options, phase="plan"),
-                    f"{plan_label}가 수정 요청 반영 계획 중", 40, plan_provider,
-                )
+                if stage("plan"):
+                    run_agent(
+                        self._revision_prompt(project, ppt_root, helper, runner, prompt_kit,
+                                              options, phase="plan"),
+                        f"{plan_label}가 수정 요청 반영 계획 중", 40, plan_provider,
+                    )
+                    mark("plan")
                 image_manifest = project / "images" / "image_prompts.json"
                 image_style_lock = project / "images" / "image_style_lock.json"
-                if (use_ai and runner and prompt_kit and image_manifest.is_file()
-                        and image_style_lock.is_file()):
-                    payload = json.loads(image_manifest.read_text(encoding="utf-8"))
-                    changed = [
-                        item for item in payload.get("items") or []
-                        if item.get("status") != "Generated"
-                        or not (project / "images" / Path(
-                            str(item.get("filename", ""))).name).is_file()
-                    ]
-                    if changed:
-                        run_image_fleet(image_manifest, image_style_lock)
-                run_agent(
-                    self._revision_prompt(project, ppt_root, helper, runner, prompt_kit,
-                                          options, phase="execute"),
-                    f"{build_label}가 슬라이드 수정 중", 66, build_provider,
-                )
+                if stage("images"):
+                    if (use_ai and runner and prompt_kit and image_manifest.is_file()
+                            and image_style_lock.is_file()):
+                        changed = [
+                            item for item in manifest_items(image_manifest)
+                            if item.get("status") != "Generated"
+                            or not (project / "images" / Path(
+                                str(item.get("filename", ""))).name).is_file()
+                        ]
+                        if changed:
+                            run_image_fleet(image_manifest, image_style_lock)
+                    mark("images")
+                if stage("build"):
+                    run_agent(
+                        self._revision_prompt(project, ppt_root, helper, runner, prompt_kit,
+                                              options, phase="execute"),
+                        f"{build_label}가 슬라이드 수정 중", 66, build_provider,
+                    )
+                    mark("build")
                 self._write_status(job_id, stage="PPTX 내보내기 중", progress=94)
                 export_pptx()
             elif use_ai:
                 if not runner or not runner.is_file() or not prompt_kit:
                     raise RuntimeError("AI 이미지 생성 실행 파일을 찾을 수 없습니다")
-                selected_image_style = get_image_style(
-                    str(options.get("image_style") or "")
-                )
                 image_style_lock = project / "images" / "image_style_lock.json"
-                image_style_lock.write_text(
-                    json.dumps(
-                        {
-                            "version": 1,
-                            "image_style_id": selected_image_style["id"],
-                            "name": selected_image_style["name"],
-                            "visual_dna": selected_image_style["visual_dna"],
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    encoding="utf-8",
-                )
-                run_agent(
-                    self._agent_prompt(
-                        project, ppt_root, helper, runner, prompt_kit, options,
-                        phase="plan",
-                    ),
-                    f"{plan_label}가 슬라이드·이미지 아트 디렉션 중",
-                    40,
-                    plan_provider,
-                )
                 image_manifest = project / "images" / "image_prompts.json"
-                if not image_manifest.is_file():
-                    raise RuntimeError("이미지 설계 manifest가 생성되지 않았습니다")
-                run_image_fleet(image_manifest, image_style_lock)
-                run_agent(
-                    self._agent_prompt(
-                        project, ppt_root, helper, runner, prompt_kit, options,
-                        phase="execute",
-                    ),
-                    f"{build_label}가 슬라이드 제작 중",
-                    66,
-                    build_provider,
-                )
+                if stage("plan"):
+                    selected_image_style = get_image_style(
+                        str(options.get("image_style") or "")
+                    )
+                    image_style_lock.write_text(
+                        json.dumps(
+                            {
+                                "version": 1,
+                                "image_style_id": selected_image_style["id"],
+                                "name": selected_image_style["name"],
+                                "visual_dna": selected_image_style["visual_dna"],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                    run_agent(
+                        self._agent_prompt(
+                            project, ppt_root, helper, runner, prompt_kit, options,
+                            phase="plan",
+                        ),
+                        f"{plan_label}가 슬라이드·이미지 아트 디렉션 중",
+                        40,
+                        plan_provider,
+                    )
+                    # 설계가 이미지 계획을 제대로 냈는지 여기서 확인한다 — 빈 계획을 '설계 완료'로
+                    # 기록하면 다시 시도할 때마다 이미지 단계에서 같은 이유로 실패한다
+                    if not image_manifest.is_file():
+                        raise RuntimeError("이미지 설계 manifest가 생성되지 않았습니다")
+                    if not manifest_items(image_manifest):
+                        raise RuntimeError(
+                            "설계 단계가 이미지 계획을 비워 둔 채 끝났습니다 "
+                            "(images/image_prompts.json 의 items가 비어 있음)")
+                    mark("plan")
+                if stage("images"):
+                    run_image_fleet(image_manifest, image_style_lock)
+                    mark("images")
+                if stage("build"):
+                    run_agent(
+                        self._agent_prompt(
+                            project, ppt_root, helper, runner, prompt_kit, options,
+                            phase="execute",
+                        ),
+                        f"{build_label}가 슬라이드 제작 중",
+                        66,
+                        build_provider,
+                    )
+                    mark("build")
                 self._write_status(
                     job_id, stage="PPTX 내보내기 중", progress=94,
                 )
