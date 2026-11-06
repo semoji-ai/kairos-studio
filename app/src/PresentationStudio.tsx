@@ -28,6 +28,8 @@ export default function PresentationStudio() {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // 재시도 요청을 보낸 뒤 서버 응답 전까지 버튼을 잠근다 (두 번 누르기 방지)
+  const [retrying, setRetrying] = useState<Set<string>>(new Set());
   useEffect(() => {
     presentationEngines().then(result => {
       setEngines(result);
@@ -162,12 +164,17 @@ export default function PresentationStudio() {
               <div className="job-stage"><span>{job.stage}</span><b>{job.progress ?? 0}%</b></div>
               {job.error && <div className="job-error">{job.error}</div>}
               {!!job.log?.length && <details><summary>작업 로그</summary><pre>{job.log.slice(-80).join("")}</pre></details>}
-              {job.status === "failed" && <button className="retry-action" onClick={async () => {
+              {(job.status === "queued" || job.status === "running" || retrying.has(job.id)) ? (
+                <button className="retry-action" disabled>제작 중…</button>
+              ) : job.status === "failed" && <button className="retry-action" onClick={async () => {
+                setRetrying(old => new Set(old).add(job.id));
                 try {
                   const retried = await retryPresentation(job.id);
                   setJobs(old => old.map(item => item.id === retried.id ? retried : item));
                 } catch (e) {
                   setError(e instanceof Error ? e.message : "재시도하지 못했습니다");
+                } finally {
+                  setRetrying(old => { const next = new Set(old); next.delete(job.id); return next; });
                 }
               }}>이 작업 다시 시도</button>}
               {job.status === "completed" && <div className="presentation-result-actions">
