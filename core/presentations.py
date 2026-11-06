@@ -218,9 +218,14 @@ class PresentationManager:
         workspace = self._job_dir(job_id) / "workspace"
         if workspace.is_dir():
             shutil.rmtree(workspace)
+        # 재시도는 새로 시작한다 — 화면에 남던 이전 실패 로그·오류는 지우고, 원인 추적용으로
+        # 마지막 몇 번의 실패 기록만 retry_history 에 남긴다 (화면에는 보이지 않음).
+        history = list(current.get("retry_history") or [])
+        if current.get("error"):
+            history.append({"at": _now(), "error": str(current["error"])[:2000]})
         self._write_status(job_id, status="queued", stage="재시도 대기 중", progress=5,
-                           error=None, recover_attempts=0,
-                           log=list(current.get("log") or []) + ["작업 재시도\n"])
+                           error=None, recover_attempts=0, retry_history=history[-5:],
+                           log=["작업을 처음부터 다시 시작합니다\n"])
         self._dispatch(job_id, source, dict(current.get("options") or {}))
         return self.get(job_id) or current
 
