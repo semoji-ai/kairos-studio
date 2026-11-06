@@ -255,6 +255,16 @@ def test_manager_reads_utf8_bom_status_history(tmp_path):
     assert manager.list()[0]["id"] == "abc123abc123"
 
 
+def test_plain_path_strips_windows_extended_prefix(tmp_path):
+    # 앱이 넘기는 번들 경로는 \\?\C:\... 표기 — Claude의 --add-dir·실행 허용과 맞지 않았다
+    from core.presentations import plain_path
+    assert plain_path(r"\\?\C:\Users\me\python.exe") == r"C:\Users\me\python.exe"
+    assert plain_path(r"\\?\UNC\server\share\x") == r"\\server\share\x"
+    assert plain_path(r"C:\plain\path") == r"C:\plain\path"
+    manager = PresentationManager(tmp_path, Path(r"\\?\C:\bundle"), external_worker=True)
+    assert str(manager.bundle_dir) == r"C:\bundle"
+
+
 def test_hybrid_splits_art_direction_and_build():
     # 기본은 Opus(설계·이미지 프롬프트) + Codex(제작)
     from core.presentations import normalize_provider, phase_providers

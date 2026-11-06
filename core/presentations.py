@@ -96,6 +96,19 @@ def phase_providers(provider: str) -> tuple[str, str]:
     return provider, provider
 
 
+def plain_path(value) -> str:
+    r"""Windows 확장 경로 표기(\\?\C:\...)를 일반 경로로. 앱(Tauri)이 넘기는 번들 경로와
+    그 안의 python.exe가 이 표기라, 에이전트에게 그대로 주면 Claude는 폴더 접근 허용
+    (--add-dir)과 실행 허용 규칙을 일반 경로와 다른 것으로 보고 막는다."""
+    text = str(value)
+    if text.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + text[8:]
+    return text[4:] if text.startswith("\\\\?\\") else text
+
+
+# 에이전트에게 보여 주고 실행을 허용할 파이썬 경로 (확장 표기 제거)
+PYTHON = plain_path(sys.executable)
+
 _IO_RETRIES = 20
 _IO_RETRY_SECONDS = 0.05
 
@@ -163,7 +176,7 @@ class PresentationManager:
                  external_worker: bool | None = None):
         self.root = data_dir / "presentations"
         self.root.mkdir(parents=True, exist_ok=True)
-        self.bundle_dir = bundle_dir
+        self.bundle_dir = Path(plain_path(bundle_dir)) if bundle_dir else None
         self.external_worker = (
             os.environ.get("KAIROS_PRESENTATION_EXTERNAL_WORKER") == "1"
             if external_worker is None else external_worker
@@ -531,8 +544,8 @@ class PresentationManager:
                 "codex_sandbox": "workspace-write",
                 "claude_permission_mode": "acceptEdits",
                 "claude_allowed_tools": [
-                    f"Bash({sys.executable} {ppt_root / 'skills' / 'ppt-master' / 'scripts'}/*:*)",
-                    f"Bash({sys.executable} {helper}:*)",
+                    f"Bash({PYTHON} {ppt_root / 'skills' / 'ppt-master' / 'scripts'}/*:*)",
+                    f"Bash({PYTHON} {plain_path(helper)}:*)",
                 ],
                 # Claude는 헤드리스에서 작업 폴더 밖 문서를 읽으려면 미리 열어 둬야 한다
                 "claude_add_dirs": [str(d) for d in (ppt_root, prompt_kit) if d],
@@ -823,11 +836,12 @@ class PresentationManager:
 
 사용자가 카이로스 화면에서 아래 제작 사양을 직접 확정했고, 나머지 세부 디자인 판단을
 에이전트에게 명시적으로 위임했습니다. 별도 확인 UI를 열거나 질문하지 마세요.
+작업 중 남기는 진행 설명은 한국어로 짧게 쓰세요 (사용자가 화면에서 읽습니다).
 {route_instruction}
-모든 Python 스크립트는 `{sys.executable}` 인터프리터로 실행하세요.
+모든 Python 스크립트는 `{PYTHON}` 인터프리터로 실행하세요.
 현재 운영체제는 Windows PowerShell입니다. Bash heredoc(`<<`, `<<'PY'`)과 셸 입력
 리다이렉션으로 Python 코드를 실행하지 마세요. 여러 줄 Python이 필요하면 프로젝트 안에
-`.py` 파일을 작성한 뒤 `{sys.executable} script.py` 형태로 실행하세요.
+`.py` 파일을 작성한 뒤 `{PYTHON} script.py` 형태로 실행하세요.
 비대화형 작업이므로 live preview/Flask 서버나 브라우저를 시작하지 마세요.
 - 제목: {options.get('title', '강의안')}
 - 대상: {options.get('audience', '일반 학습자')}
@@ -856,13 +870,14 @@ class PresentationManager:
 스킬 진입점: {ppt_root / 'skills' / 'ppt-master' / 'SKILL.md'}
 프로젝트: {project}
 사용자가 화면에서 아래 수정을 요청했습니다. 별도 확인 UI를 열거나 질문하지 마세요.
+작업 중 남기는 진행 설명은 한국어로 짧게 쓰세요.
 
 <수정 요청>
 {request}
 </수정 요청>
 
 요청한 부분만 바꾸고 나머지 슬라이드·문구·이미지·디자인은 그대로 둡니다.
-모든 Python 스크립트는 `{sys.executable}` 인터프리터로 실행하세요. Windows PowerShell
+모든 Python 스크립트는 `{PYTHON}` 인터프리터로 실행하세요. Windows PowerShell
 환경이므로 Bash heredoc을 쓰지 말고, 여러 줄 Python은 `.py` 파일로 만들어 실행하세요.
 live preview/Flask 서버나 브라우저를 시작하지 마세요.
 """.strip()
