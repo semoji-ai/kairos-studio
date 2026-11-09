@@ -157,6 +157,14 @@ export default function Chat() {
   const [pendingStartedAt, setPendingStartedAt] = useState<number | null>(null);
   const [pendingElapsed, setPendingElapsed] = useState(0);
   const [input, setInput] = useState("");
+  // 입력창은 글의 분량만큼 자란다 — 높이 상한·하한은 CSS(.composer-input)가 정한다
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -485,7 +493,7 @@ export default function Chat() {
         </div>
         <div className="composer-wrap">
           <div className="composer">
-            <textarea className="composer-input" value={input} onChange={e => setInput(e.target.value)}
+            <textarea ref={composerRef} className="composer-input" value={input} onChange={e => setInput(e.target.value)}
                       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                       placeholder="메시지 (@claude / @codex 로 강제 지정)" />
             <button className="btn-primary send-btn" onClick={send} disabled={busy}>보내기</button>
